@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 
 type Expense = {
-  id: number;
+  id: string;
   title: string;
   category: string;
   amount: number;
@@ -21,41 +21,14 @@ type Expense = {
   notes: string;
 };
 
-const initialExpenses: Expense[] = [
-  {
-    id: 1,
-    title: "Office Rent",
-    category: "Rent",
-    amount: 25000,
-    date: "26 Sep 2026",
-    paymentMethod: "Bank Transfer",
-    notes: "Monthly office rent",
-  },
-  {
-    id: 2,
-    title: "Electricity Bill",
-    category: "Utilities",
-    amount: 4200,
-    date: "24 Sep 2026",
-    paymentMethod: "UPI",
-    notes: "September electricity",
-  },
-  {
-    id: 3,
-    title: "Internet",
-    category: "Utilities",
-    amount: 1500,
-    date: "22 Sep 2026",
-    paymentMethod: "UPI",
-    notes: "Business internet",
-  },
-];
-
 export default function ExpensesPage() {
-  const [expenses, setExpenses] = useState<Expense[]>(initialExpenses);
+  const [expenses, setExpenses] = useState<Expense[]>([]);
 
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [title, setTitle] = useState("");
   const [category, setCategory] = useState("");
@@ -63,6 +36,27 @@ export default function ExpensesPage() {
   const [date, setDate] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("");
   const [notes, setNotes] = useState("");
+
+  const fetchExpenses = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/expenses");
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.message || "Failed to fetch expenses");
+      }
+      setExpenses(json.data.expenses || []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "An error occurred");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchExpenses();
+  }, []);
 
   const filteredExpenses = expenses.filter((expense) => {
     const value = search.toLowerCase();
@@ -79,48 +73,48 @@ export default function ExpensesPage() {
     0,
   );
 
-  const handleAddExpense = (e: React.FormEvent) => {
+  const handleAddExpense = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!title || !category || !amount) return;
 
-    const newExpense: Expense = {
-      id: Date.now(),
-      title,
-      category,
-      amount: Number(amount),
-      date: date
-        ? new Date(date).toLocaleDateString("en-IN", {
-            day: "2-digit",
-            month: "short",
-            year: "numeric",
-          })
-        : new Date().toLocaleDateString("en-IN", {
-            day: "2-digit",
-            month: "short",
-            year: "numeric",
-          }),
-      paymentMethod: paymentMethod || "Cash",
-      notes,
-    };
-
-    setExpenses((previous) => [newExpense, ...previous]);
-
-    setTitle("");
-    setCategory("");
-    setAmount("");
-    setDate("");
-    setPaymentMethod("");
-    setNotes("");
-    setShowForm(false);
+    setIsSubmitting(true);
+    try {
+      const res = await fetch("/api/expenses/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title,
+          category,
+          amount: Number(amount),
+          date,
+          paymentMethod,
+          notes,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.message || "Failed to create expense");
+      }
+      
+      await fetchExpenses();
+      
+      setTitle("");
+      setCategory("");
+      setAmount("");
+      setDate("");
+      setPaymentMethod("");
+      setNotes("");
+      setShowForm(false);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to create expense");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
     <main className="min-h-screen bg-slate-50">
-      {/* Header */}
-      
-
-      {/* Content */}
       <div className="mx-auto max-w-7xl px-6 py-6">
         <div className="mb-6 flex justify-end">
           <button
@@ -131,21 +125,28 @@ export default function ExpensesPage() {
             Add Expense
           </button>
         </div>
+        
+        {error && (
+          <div className="mb-6 rounded-xl border border-red-200 bg-red-50 p-4 text-red-600">
+            {error}
+          </div>
+        )}
+
         {/* Summary */}
         <div className="mb-6 grid gap-4 sm:grid-cols-3">
           <StatCard
             title="Total Expenses"
-            value={`₹${totalExpenses.toLocaleString("en-IN")}`}
+            value={isLoading ? "..." : `₹${totalExpenses.toLocaleString("en-IN")}`}
           />
 
           <StatCard
             title="Expense Entries"
-            value={expenses.length.toString()}
+            value={isLoading ? "..." : expenses.length.toString()}
           />
 
           <StatCard
             title="Average Expense"
-            value={`₹${
+            value={isLoading ? "..." : `₹${
               expenses.length
                 ? Math.round(totalExpenses / expenses.length).toLocaleString(
                     "en-IN",
@@ -184,7 +185,11 @@ export default function ExpensesPage() {
             <span>Notes</span>
           </div>
 
-          {filteredExpenses.length === 0 ? (
+          {isLoading ? (
+            <div className="px-6 py-16 text-center text-sm text-slate-500">
+              Loading...
+            </div>
+          ) : filteredExpenses.length === 0 ? (
             <div className="px-6 py-16 text-center">
               <Receipt size={40} className="mx-auto text-slate-300" />
 
@@ -254,7 +259,8 @@ export default function ExpensesPage() {
 
               <button
                 onClick={() => setShowForm(false)}
-                className="rounded-lg p-2 text-slate-400 hover:bg-slate-100"
+                disabled={isSubmitting}
+                className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 disabled:opacity-50"
               >
                 <X size={20} />
               </button>
@@ -282,15 +288,15 @@ export default function ExpensesPage() {
                     className="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                   >
                     <option value="">Select category</option>
-                    <option>Rent</option>
-                    <option>Utilities</option>
-                    <option>Salary</option>
-                    <option>Transport</option>
-                    <option>Marketing</option>
-                    <option>Office Supplies</option>
-                    <option>Maintenance</option>
-                    <option>Travel</option>
-                    <option>Other</option>
+                    <option value="Rent">Rent</option>
+                    <option value="Utilities">Utilities</option>
+                    <option value="Salary">Salary</option>
+                    <option value="Transport">Transport</option>
+                    <option value="Marketing">Marketing</option>
+                    <option value="Office Supplies">Office Supplies</option>
+                    <option value="Maintenance">Maintenance</option>
+                    <option value="Travel">Travel</option>
+                    <option value="Other">Other</option>
                   </select>
                 </div>
 
@@ -329,11 +335,11 @@ export default function ExpensesPage() {
                     className="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                   >
                     <option value="">Select method</option>
-                    <option>Cash</option>
-                    <option>UPI</option>
-                    <option>Bank Transfer</option>
-                    <option>Card</option>
-                    <option>Cheque</option>
+                    <option value="Cash">Cash</option>
+                    <option value="UPI">UPI</option>
+                    <option value="Bank Transfer">Bank Transfer</option>
+                    <option value="Card">Card</option>
+                    <option value="Cheque">Cheque</option>
                   </select>
                 </div>
               </div>
@@ -356,16 +362,18 @@ export default function ExpensesPage() {
                 <button
                   type="button"
                   onClick={() => setShowForm(false)}
-                  className="flex-1 rounded-lg border border-slate-200 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  disabled={isSubmitting}
+                  className="flex-1 rounded-lg border border-slate-200 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                 >
                   Cancel
                 </button>
 
                 <button
                   type="submit"
-                  className="flex-1 rounded-lg bg-blue-600 py-3 text-sm font-semibold text-white hover:bg-blue-700"
+                  disabled={isSubmitting}
+                  className="flex-1 rounded-lg bg-blue-600 py-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
                 >
-                  Save Expense
+                  {isSubmitting ? "Saving..." : "Save Expense"}
                 </button>
               </div>
             </form>

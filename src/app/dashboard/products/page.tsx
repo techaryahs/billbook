@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -13,40 +13,21 @@ import {
 } from "lucide-react";
 
 type Product = {
-  id: number;
+  id: string;
   name: string;
-  sku: string;
-  category: string;
+  sku: string | null;
+  category: string | null; // Using description as category/type
   sellingPrice: number;
   purchasePrice: number;
-  stock: number;
+  stockQuantity: number;
 };
 
-const initialProducts: Product[] = [
-  {
-    id: 1,
-    name: "ABC Product",
-    sku: "ABC001",
-    category: "General",
-    sellingPrice: 500,
-    purchasePrice: 350,
-    stock: 25,
-  },
-  {
-    id: 2,
-    name: "Premium Product",
-    sku: "PREM001",
-    category: "Premium",
-    sellingPrice: 1200,
-    purchasePrice: 850,
-    stock: 12,
-  },
-];
-
 export default function ProductsPage() {
-  const [products, setProducts] = useState<Product[]>(initialProducts);
+  const [products, setProducts] = useState<Product[]>([]);
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const [name, setName] = useState("");
   const [sku, setSku] = useState("");
@@ -54,55 +35,88 @@ export default function ProductsPage() {
   const [sellingPrice, setSellingPrice] = useState("");
   const [purchasePrice, setPurchasePrice] = useState("");
   const [stock, setStock] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const fetchProducts = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/products");
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.message || "Failed to fetch products");
+      }
+      setProducts(json.data || []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "An error occurred");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchProducts();
+  }, []);
 
   const filteredProducts = products.filter((product) => {
     const value = search.toLowerCase();
 
     return (
       product.name.toLowerCase().includes(value) ||
-      product.sku.toLowerCase().includes(value) ||
-      product.category.toLowerCase().includes(value)
+      (product.sku && product.sku.toLowerCase().includes(value)) ||
+      (product.category && product.category.toLowerCase().includes(value))
     );
   });
 
-  const handleAddProduct = (e: React.FormEvent) => {
+  const handleAddProduct = async (e: React.FormEvent) => {
     e.preventDefault();
-
     if (!name || !sellingPrice) return;
 
-    const newProduct: Product = {
-      id: Date.now(),
-      name,
-      sku,
-      category,
-      sellingPrice: Number(sellingPrice),
-      purchasePrice: Number(purchasePrice) || 0,
-      stock: Number(stock) || 0,
-    };
+    setIsSubmitting(true);
+    try {
+      const res = await fetch("/api/products", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          sku,
+          description: category,
+          sellingPrice: Number(sellingPrice),
+          purchasePrice: Number(purchasePrice) || 0,
+          stockQuantity: Number(stock) || 0,
+        }),
+      });
+      const json = await res.json();
 
-    setProducts((previous) => [newProduct, ...previous]);
+      if (!res.ok || !json.success) {
+        throw new Error(json.message || "Failed to add product");
+      }
 
-    setName("");
-    setSku("");
-    setCategory("");
-    setSellingPrice("");
-    setPurchasePrice("");
-    setStock("");
-    setShowForm(false);
+      await fetchProducts();
+
+      setName("");
+      setSku("");
+      setCategory("");
+      setSellingPrice("");
+      setPurchasePrice("");
+      setStock("");
+      setShowForm(false);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to add product");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const totalStock = products.reduce((sum, product) => sum + product.stock, 0);
+  const totalStock = products.reduce((sum, product) => sum + Number(product.stockQuantity || 0), 0);
 
   const stockValue = products.reduce(
-    (sum, product) => sum + product.purchasePrice * product.stock,
+    (sum, product) => sum + (Number(product.purchasePrice) || 0) * Number(product.stockQuantity || 0),
     0,
   );
 
   return (
     <main className="min-h-screen bg-slate-50">
-      {/* Header */}
-      
-
       {/* Content */}
       <div className="mx-auto max-w-7xl px-6 py-6">
         <div className="mb-6 flex justify-end">
@@ -114,18 +128,25 @@ export default function ProductsPage() {
             Add Product
           </button>
         </div>
+        
+        {error && (
+          <div className="mb-6 rounded-xl border border-red-200 bg-red-50 p-4 text-red-600">
+            {error}
+          </div>
+        )}
+
         {/* Stats */}
         <div className="mb-6 grid gap-4 sm:grid-cols-3">
-          <StatCard title="Total Products" value={products.length.toString()} />
+          <StatCard title="Total Products" value={isLoading ? "..." : products.length.toString()} />
 
           <StatCard
             title="Total Stock"
-            value={totalStock.toLocaleString("en-IN")}
+            value={isLoading ? "..." : totalStock.toLocaleString("en-IN")}
           />
 
           <StatCard
             title="Stock Value"
-            value={`₹${stockValue.toLocaleString("en-IN")}`}
+            value={isLoading ? "..." : `₹${stockValue.toLocaleString("en-IN")}`}
           />
         </div>
 
@@ -158,16 +179,21 @@ export default function ProductsPage() {
             <span>Stock</span>
           </div>
 
-          {filteredProducts.length === 0 ? (
+          {isLoading ? (
+            <div className="px-6 py-16 text-center">
+              <div className="mx-auto h-8 w-8 animate-spin rounded-full border-b-2 border-blue-600"></div>
+              <p className="mt-4 text-sm text-slate-500">Loading products...</p>
+            </div>
+          ) : filteredProducts.length === 0 ? (
             <div className="px-6 py-16 text-center">
               <Package size={40} className="mx-auto text-slate-300" />
-
               <h3 className="mt-4 font-semibold text-slate-900">
-                No products found
+                {search ? "No matches found" : "No products found"}
               </h3>
-
               <p className="mt-1 text-sm text-slate-500">
-                Add your first product to start managing inventory.
+                {search
+                  ? "Try a different search term"
+                  : "Add your first product to start managing inventory."}
               </p>
             </div>
           ) : (
@@ -190,24 +216,24 @@ export default function ProductsPage() {
                 </div>
 
                 <div className="text-sm text-slate-600">
-                  ₹{product.purchasePrice.toLocaleString("en-IN")}
+                  ₹{Number(product.purchasePrice).toLocaleString("en-IN")}
                 </div>
 
                 <div className="font-semibold text-slate-900">
-                  ₹{product.sellingPrice.toLocaleString("en-IN")}
+                  ₹{Number(product.sellingPrice).toLocaleString("en-IN")}
                 </div>
 
                 <div>
                   <span
                     className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
-                      product.stock === 0
+                      Number(product.stockQuantity) <= 0
                         ? "bg-red-50 text-red-600"
-                        : product.stock <= 5
+                        : Number(product.stockQuantity) <= 5
                           ? "bg-yellow-50 text-yellow-700"
                           : "bg-green-50 text-green-600"
                     }`}
                   >
-                    {product.stock} units
+                    {Number(product.stockQuantity)} units
                   </span>
                 </div>
               </div>
@@ -233,6 +259,7 @@ export default function ProductsPage() {
               <button
                 onClick={() => setShowForm(false)}
                 className="rounded-lg p-2 text-slate-400 hover:bg-slate-100"
+                disabled={isSubmitting}
               >
                 <X size={20} />
               </button>
@@ -295,16 +322,18 @@ export default function ProductsPage() {
                 <button
                   type="button"
                   onClick={() => setShowForm(false)}
-                  className="flex-1 rounded-lg border border-slate-200 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  disabled={isSubmitting}
+                  className="flex-1 rounded-lg border border-slate-200 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                 >
                   Cancel
                 </button>
 
                 <button
                   type="submit"
-                  className="flex-1 rounded-lg bg-blue-600 py-3 text-sm font-semibold text-white hover:bg-blue-700"
+                  disabled={isSubmitting}
+                  className="flex-1 rounded-lg bg-blue-600 py-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
                 >
-                  Add Product
+                  {isSubmitting ? "Adding..." : "Add Product"}
                 </button>
               </div>
             </form>
@@ -319,7 +348,6 @@ function StatCard({ title, value }: { title: string; value: string }) {
   return (
     <div className="rounded-xl border bg-white p-5">
       <p className="text-sm text-slate-500">{title}</p>
-
       <p className="mt-2 text-2xl font-bold text-slate-900">{value}</p>
     </div>
   );

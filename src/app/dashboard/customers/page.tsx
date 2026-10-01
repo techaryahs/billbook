@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   ArrowLeft,
   Mail,
@@ -14,81 +14,90 @@ import {
 import Link from "next/link";
 
 type Customer = {
-  id: number;
+  id: string;
   name: string;
-  phone: string;
-  email: string;
-  city: string;
+  phone: string | null;
+  email: string | null;
+  city: string | null;
   outstanding: number;
 };
 
-const initialCustomers: Customer[] = [
-  {
-    id: 1,
-    name: "Rahul Sharma",
-    phone: "9876543210",
-    email: "rahul@example.com",
-    city: "Mumbai",
-    outstanding: 12500,
-  },
-  {
-    id: 2,
-    name: "Priya Enterprises",
-    phone: "9988776655",
-    email: "priya@example.com",
-    city: "Pune",
-    outstanding: 8200,
-  },
-];
-
 export default function CustomersPage() {
-  const [customers, setCustomers] = useState<Customer[]>(initialCustomers);
+  const [customers, setCustomers] = useState<Customer[]>([]);
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [city, setCity] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const fetchCustomers = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/customers");
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.message || "Failed to fetch customers");
+      }
+      setCustomers(json.data || []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "An error occurred");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchCustomers();
+  }, []);
 
   const filteredCustomers = customers.filter((customer) => {
     const value = search.toLowerCase();
-
     return (
       customer.name.toLowerCase().includes(value) ||
-      customer.phone.includes(value) ||
-      customer.email.toLowerCase().includes(value)
+      (customer.phone && customer.phone.includes(value)) ||
+      (customer.email && customer.email.toLowerCase().includes(value))
     );
   });
 
-  const handleAddCustomer = (e: React.FormEvent) => {
+  const handleAddCustomer = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!name) return;
 
-    if (!name || !phone) return;
+    setIsSubmitting(true);
+    try {
+      const res = await fetch("/api/customers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, phone, email, city }),
+      });
+      const json = await res.json();
 
-    const newCustomer: Customer = {
-      id: Date.now(),
-      name,
-      phone,
-      email,
-      city,
-      outstanding: 0,
-    };
+      if (!res.ok || !json.success) {
+        throw new Error(json.message || "Failed to add customer");
+      }
 
-    setCustomers((previous) => [newCustomer, ...previous]);
+      await fetchCustomers();
 
-    setName("");
-    setPhone("");
-    setEmail("");
-    setCity("");
-    setShowForm(false);
+      setName("");
+      setPhone("");
+      setEmail("");
+      setCity("");
+      setShowForm(false);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to add customer");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
     <main className="min-h-screen bg-slate-50">
-      {/* Header */}
-      
-
       {/* Content */}
       <div className="mx-auto max-w-7xl px-6 py-6">
         <div className="mb-6 flex justify-end">
@@ -100,23 +109,34 @@ export default function CustomersPage() {
             Add Customer
           </button>
         </div>
+        
+        {error && (
+          <div className="mb-6 rounded-xl border border-red-200 bg-red-50 p-4 text-red-600">
+            {error}
+          </div>
+        )}
+
         {/* Stats */}
         <div className="mb-6 grid gap-4 sm:grid-cols-3">
           <StatCard
             title="Total Customers"
-            value={customers.length.toString()}
+            value={isLoading ? "..." : customers.length.toString()}
           />
 
           <StatCard
             title="Total Outstanding"
-            value={`₹${customers
-              .reduce((sum, customer) => sum + customer.outstanding, 0)
-              .toLocaleString("en-IN")}`}
+            value={
+              isLoading
+                ? "..."
+                : `₹${customers
+                    .reduce((sum, customer) => sum + (customer.outstanding || 0), 0)
+                    .toLocaleString("en-IN")}`
+            }
           />
 
           <StatCard
             title="Active Customers"
-            value={customers.length.toString()}
+            value={isLoading ? "..." : customers.length.toString()}
           />
         </div>
 
@@ -148,16 +168,21 @@ export default function CustomersPage() {
             <span className="text-right">Action</span>
           </div>
 
-          {filteredCustomers.length === 0 ? (
+          {isLoading ? (
+            <div className="px-6 py-16 text-center">
+              <div className="mx-auto h-8 w-8 animate-spin rounded-full border-b-2 border-blue-600"></div>
+              <p className="mt-4 text-sm text-slate-500">Loading customers...</p>
+            </div>
+          ) : filteredCustomers.length === 0 ? (
             <div className="px-6 py-16 text-center">
               <UserRound size={40} className="mx-auto text-slate-300" />
-
               <h3 className="mt-4 font-semibold text-slate-900">
-                No customers found
+                {search ? "No matches found" : "No customers found"}
               </h3>
-
               <p className="mt-1 text-sm text-slate-500">
-                Add a customer to start managing your customer records.
+                {search
+                  ? "Try a different search term"
+                  : "Add a customer to start managing your customer records."}
               </p>
             </div>
           ) : (
@@ -180,7 +205,7 @@ export default function CustomersPage() {
                 {/* Phone */}
                 <div className="flex items-center gap-2 text-sm text-slate-600">
                   <Phone size={15} />
-                  {customer.phone}
+                  {customer.phone || "—"}
                 </div>
 
                 {/* City */}
@@ -193,12 +218,12 @@ export default function CustomersPage() {
                 <div>
                   <p
                     className={`font-semibold ${
-                      customer.outstanding > 0
+                      (customer.outstanding || 0) > 0
                         ? "text-red-600"
                         : "text-green-600"
                     }`}
                   >
-                    ₹{customer.outstanding.toLocaleString("en-IN")}
+                    ₹{(customer.outstanding || 0).toLocaleString("en-IN")}
                   </p>
                 </div>
 
@@ -233,6 +258,7 @@ export default function CustomersPage() {
               <button
                 onClick={() => setShowForm(false)}
                 className="rounded-lg p-2 text-slate-400 hover:bg-slate-100"
+                disabled={isSubmitting}
               >
                 <X size={20} />
               </button>
@@ -253,7 +279,6 @@ export default function CustomersPage() {
                 placeholder="9876543210"
                 value={phone}
                 onChange={setPhone}
-                required
               />
 
               <FormInput
@@ -275,16 +300,18 @@ export default function CustomersPage() {
                 <button
                   type="button"
                   onClick={() => setShowForm(false)}
-                  className="flex-1 rounded-lg border border-slate-200 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  disabled={isSubmitting}
+                  className="flex-1 rounded-lg border border-slate-200 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                 >
                   Cancel
                 </button>
 
                 <button
                   type="submit"
-                  className="flex-1 rounded-lg bg-blue-600 py-3 text-sm font-semibold text-white hover:bg-blue-700"
+                  disabled={isSubmitting}
+                  className="flex-1 rounded-lg bg-blue-600 py-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
                 >
-                  Add Customer
+                  {isSubmitting ? "Adding..." : "Add Customer"}
                 </button>
               </div>
             </form>
@@ -299,7 +326,6 @@ function StatCard({ title, value }: { title: string; value: string }) {
   return (
     <div className="rounded-xl border bg-white p-5">
       <p className="text-sm text-slate-500">{title}</p>
-
       <p className="mt-2 text-2xl font-bold text-slate-900">{value}</p>
     </div>
   );

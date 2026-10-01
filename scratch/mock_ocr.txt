@@ -1,0 +1,23 @@
+ABC Wholesale Traders
+27AABCA1234F1Z5
+Invoice No: INV-2026-1048
+Invoice Date: 28-Sep-2026
+Due Date: 28-Oct-2026
+Place of Supply: Maharashtra
+
+Bill To:
+Rahul Retail Store
+27BBBCD5678G1Z2
+
+Product HSN Qty Rate GST Amount
+Premium T-Shirt - M 6109 20 450 18% 9000
+Premium T-Shirt - L 6109 15 450 18% 6750
+Cotton Jeans - 32 6203 10 1200 18% 12000
+Cotton Jeans - 34 6203 8 1200 18% 9600
+
+Subtotal: 37350
+Discount: 350
+Taxable Amount: 37000
+CGST 9%: 3330
+SGST 9%: 3330
+Grand Total: 43660

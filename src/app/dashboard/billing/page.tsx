@@ -1,17 +1,17 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import Link from "next/link";
-import { ArrowLeft, FileText, Plus, Search, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+
+import { FileText, Plus, Search, Trash2 } from "lucide-react";
 
 type Customer = {
-  id: number;
+  id: string;
   name: string;
   phone: string;
 };
 
 type Product = {
-  id: number;
+  id: string;
   name: string;
   sku: string;
   price: number;
@@ -21,7 +21,7 @@ type Product = {
 
 type InvoiceItem = {
   id: number;
-  productId: number;
+  productId: string;
   productName: string;
   quantity: number;
   price: number;
@@ -29,7 +29,7 @@ type InvoiceItem = {
 };
 
 type Invoice = {
-  id: number;
+  id: string;
   invoiceNo: string;
   customer: string;
   date: string;
@@ -37,89 +37,53 @@ type Invoice = {
   status: "Paid" | "Unpaid" | "Partial";
 };
 
-const customers: Customer[] = [
-  {
-    id: 1,
-    name: "Rahul Sharma",
-    phone: "9876543210",
-  },
-  {
-    id: 2,
-    name: "Priya Enterprises",
-    phone: "9988776655",
-  },
-  {
-    id: 3,
-    name: "Amit Traders",
-    phone: "9123456789",
-  },
-];
-
-const products: Product[] = [
-  {
-    id: 1,
-    name: "ABC Product",
-    sku: "ABC001",
-    price: 500,
-    stock: 25,
-    gst: 18,
-  },
-  {
-    id: 2,
-    name: "Premium Product",
-    sku: "PREM001",
-    price: 1200,
-    stock: 12,
-    gst: 18,
-  },
-  {
-    id: 3,
-    name: "Office Chair",
-    sku: "CHR001",
-    price: 3500,
-    stock: 4,
-    gst: 18,
-  },
-  {
-    id: 4,
-    name: "USB Cable",
-    sku: "USB001",
-    price: 150,
-    stock: 0,
-    gst: 18,
-  },
-];
-
-const initialInvoices: Invoice[] = [
-  {
-    id: 1,
-    invoiceNo: "INV-001",
-    customer: "Rahul Sharma",
-    date: "26 Sep 2026",
-    total: 5900,
-    status: "Paid",
-  },
-  {
-    id: 2,
-    invoiceNo: "INV-002",
-    customer: "Priya Enterprises",
-    date: "25 Sep 2026",
-    total: 3540,
-    status: "Unpaid",
-  },
-];
-
 export default function BillingPage() {
-  const [invoices, setInvoices] = useState<Invoice[]>(initialInvoices);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const [showForm, setShowForm] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [customerId, setCustomerId] = useState("");
   const [invoiceDate, setInvoiceDate] = useState("");
+
   const [paymentStatus, setPaymentStatus] =
     useState<Invoice["status"]>("Unpaid");
 
+  // NEW: Partial payment amount
+  const [paidAmount, setPaidAmount] = useState("");
+
   const [items, setItems] = useState<InvoiceItem[]>([]);
+
+  const fetchBillingData = async () => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const res = await fetch("/api/invoices");
+      const json = await res.json();
+
+      if (!res.ok || !json.success) {
+        throw new Error(json.message || "Failed to fetch billing data");
+      }
+
+      setInvoices(json.data.invoices || []);
+      setCustomers(json.data.customers || []);
+      setProducts(json.data.products || []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "An error occurred");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchBillingData();
+  }, []);
 
   const subtotal = useMemo(
     () => items.reduce((sum, item) => sum + item.quantity * item.price, 0),
@@ -140,7 +104,7 @@ export default function BillingPage() {
   const addProduct = (productId: string) => {
     if (!productId) return;
 
-    const product = products.find((item) => item.id === Number(productId));
+    const product = products.find((item) => item.id === productId);
 
     if (!product) return;
 
@@ -202,7 +166,7 @@ export default function BillingPage() {
     setItems((previous) => previous.filter((item) => item.id !== itemId));
   };
 
-  const handleCreateInvoice = (e: React.FormEvent) => {
+  const handleCreateInvoice = async (e: FormEvent) => {
     e.preventDefault();
 
     if (!customerId) {
@@ -215,38 +179,89 @@ export default function BillingPage() {
       return;
     }
 
-    const customer = customers.find((item) => item.id === Number(customerId));
+    const roundedGrandTotal = Math.round(grandTotal);
 
-    if (!customer) return;
+    // NEW: Validate partial payment
+    if (paymentStatus === "Partial") {
+      const numericPaidAmount = Number(paidAmount);
 
-    const newInvoice: Invoice = {
-      id: Date.now(),
-      invoiceNo: `INV-${String(invoices.length + 1).padStart(3, "0")}`,
-      customer: customer.name,
-      date: invoiceDate
-        ? new Date(invoiceDate).toLocaleDateString("en-IN", {
-            day: "2-digit",
-            month: "short",
-            year: "numeric",
-          })
-        : new Date().toLocaleDateString("en-IN", {
-            day: "2-digit",
-            month: "short",
-            year: "numeric",
-          }),
-      total: Math.round(grandTotal),
-      status: paymentStatus,
-    };
+      if (
+        !paidAmount ||
+        Number.isNaN(numericPaidAmount) ||
+        numericPaidAmount <= 0
+      ) {
+        alert("Please enter a valid paid amount for the partial payment.");
+        return;
+      }
 
-    setInvoices((previous) => [newInvoice, ...previous]);
+      if (numericPaidAmount >= roundedGrandTotal) {
+        alert(
+          "For Partial payment, the paid amount must be less than the invoice total.",
+        );
+        return;
+      }
+    }
 
-    resetForm();
+    setIsSubmitting(true);
+
+    try {
+      const res = await fetch("/api/invoices/create", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+
+        body: JSON.stringify({
+          customerId,
+
+          invoiceDate,
+
+          paymentStatus,
+
+          // NEW: Send correct paid amount
+          paidAmount:
+            paymentStatus === "Partial"
+              ? Number(paidAmount)
+              : paymentStatus === "Paid"
+                ? roundedGrandTotal
+                : 0,
+
+          items,
+
+          invoiceNo: `INV-${String(invoices.length + 1).padStart(3, "0")}`,
+
+          subtotal,
+
+          gstAmount,
+
+          total: roundedGrandTotal,
+        }),
+      });
+
+      const json = await res.json();
+
+      if (!res.ok || !json.success) {
+        throw new Error(json.message || "Failed to create invoice");
+      }
+
+      await fetchBillingData();
+
+      resetForm();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to create invoice");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const resetForm = () => {
     setCustomerId("");
     setInvoiceDate("");
     setPaymentStatus("Unpaid");
+
+    // NEW: Reset paid amount
+    setPaidAmount("");
+
     setItems([]);
     setShowForm(false);
   };
@@ -259,10 +274,8 @@ export default function BillingPage() {
 
   return (
     <main className="min-h-screen bg-slate-50">
-      {/* Header */}
-      
-
       <div className="mx-auto max-w-7xl px-6 py-6">
+        {/* Header */}
         <div className="mb-6 flex justify-end">
           <button
             onClick={() => setShowForm(true)}
@@ -272,18 +285,31 @@ export default function BillingPage() {
             Create Invoice
           </button>
         </div>
+
+        {/* Error */}
+        {error && (
+          <div className="mb-6 rounded-xl border border-red-200 bg-red-50 p-4 text-red-600">
+            {error}
+          </div>
+        )}
+
         {/* Stats */}
         <div className="mb-6 grid gap-4 sm:grid-cols-3">
-          <StatCard title="Total Invoices" value={invoices.length.toString()} />
+          <StatCard
+            title="Total Invoices"
+            value={isLoading ? "..." : invoices.length.toString()}
+          />
 
           <StatCard
             title="Total Sales"
-            value={`₹${totalSales.toLocaleString("en-IN")}`}
+            value={isLoading ? "..." : `₹${totalSales.toLocaleString("en-IN")}`}
           />
 
           <StatCard
             title="Outstanding"
-            value={`₹${outstanding.toLocaleString("en-IN")}`}
+            value={
+              isLoading ? "..." : `₹${outstanding.toLocaleString("en-IN")}`
+            }
           />
         </div>
 
@@ -313,44 +339,70 @@ export default function BillingPage() {
             <span className="text-right">Amount</span>
           </div>
 
-          {invoices.map((invoice) => (
-            <div
-              key={invoice.id}
-              className="grid gap-3 border-b px-6 py-4 last:border-b-0 md:grid-cols-5 md:items-center"
-            >
-              <div className="flex items-center gap-2">
-                <FileText size={17} className="text-blue-600" />
+          {isLoading ? (
+            <div className="px-6 py-16 text-center">
+              <div className="mx-auto h-8 w-8 animate-spin rounded-full border-b-2 border-blue-600" />
 
-                <span className="font-semibold text-blue-600">
-                  {invoice.invoiceNo}
-                </span>
-              </div>
-
-              <div className="font-medium text-slate-900">
-                {invoice.customer}
-              </div>
-
-              <div className="text-sm text-slate-500">{invoice.date}</div>
-
-              <div>
-                <span
-                  className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
-                    invoice.status === "Paid"
-                      ? "bg-green-50 text-green-600"
-                      : invoice.status === "Partial"
-                        ? "bg-yellow-50 text-yellow-700"
-                        : "bg-red-50 text-red-600"
-                  }`}
-                >
-                  {invoice.status}
-                </span>
-              </div>
-
-              <div className="font-semibold text-slate-900 md:text-right">
-                ₹{invoice.total.toLocaleString("en-IN")}
-              </div>
+              <p className="mt-4 text-sm text-slate-500">Loading invoices...</p>
             </div>
-          ))}
+          ) : invoices.length === 0 ? (
+            <div className="px-6 py-16 text-center">
+              <FileText size={40} className="mx-auto text-slate-300" />
+
+              <h3 className="mt-4 font-semibold text-slate-900">
+                No invoices found
+              </h3>
+
+              <p className="mt-1 text-sm text-slate-500">
+                Create your first invoice to start billing customers.
+              </p>
+            </div>
+          ) : (
+            invoices.map((invoice) => (
+              <div
+                key={invoice.id}
+                className="grid gap-3 border-b px-6 py-4 last:border-b-0 md:grid-cols-5 md:items-center"
+              >
+                <div className="flex items-center gap-2">
+                  <FileText size={17} className="text-blue-600" />
+
+                  <span className="font-semibold text-blue-600">
+                    {invoice.invoiceNo}
+                  </span>
+                </div>
+
+                <div className="font-medium text-slate-900">
+                  {invoice.customer}
+                </div>
+
+                <div className="text-sm text-slate-500">
+                  {new Intl.DateTimeFormat("en-IN", {
+                    day: "2-digit",
+                    month: "short",
+                    year: "numeric",
+                  }).format(new Date(invoice.date))}
+                </div>
+
+                <div>
+                  <span
+                    className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
+                      invoice.status === "Paid"
+                        ? "bg-green-50 text-green-600"
+                        : invoice.status === "Partial"
+                          ? "bg-yellow-50 text-yellow-700"
+                          : "bg-red-50 text-red-600"
+                    }`}
+                  >
+                    {invoice.status}
+                  </span>
+                </div>
+
+                <div className="font-semibold text-slate-900 md:text-right">
+                  ₹{invoice.total.toLocaleString("en-IN")}
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </div>
 
@@ -372,15 +424,17 @@ export default function BillingPage() {
 
               <button
                 onClick={resetForm}
-                className="rounded-lg p-2 text-slate-400 hover:bg-slate-100"
+                disabled={isSubmitting}
+                className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 disabled:opacity-50"
               >
                 ×
               </button>
             </div>
 
             <form onSubmit={handleCreateInvoice} className="p-6">
-              {/* Customer */}
+              {/* Customer / Date / Payment Status */}
               <div className="grid gap-4 md:grid-cols-3">
+                {/* Customer */}
                 <div>
                   <label className="mb-2 block text-sm font-medium text-slate-700">
                     Customer
@@ -402,6 +456,7 @@ export default function BillingPage() {
                   </select>
                 </div>
 
+                {/* Invoice Date */}
                 <div>
                   <label className="mb-2 block text-sm font-medium text-slate-700">
                     Invoice Date
@@ -415,6 +470,7 @@ export default function BillingPage() {
                   />
                 </div>
 
+                {/* Payment Status */}
                 <div>
                   <label className="mb-2 block text-sm font-medium text-slate-700">
                     Payment Status
@@ -422,9 +478,17 @@ export default function BillingPage() {
 
                   <select
                     value={paymentStatus}
-                    onChange={(e) =>
-                      setPaymentStatus(e.target.value as Invoice["status"])
-                    }
+                    onChange={(e) => {
+                      const value = e.target.value as Invoice["status"];
+
+                      setPaymentStatus(value);
+
+                      // Clear partial amount when
+                      // switching away from Partial.
+                      if (value !== "Partial") {
+                        setPaidAmount("");
+                      }
+                    }}
                     className="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                   >
                     <option value="Paid">Paid</option>
@@ -435,6 +499,45 @@ export default function BillingPage() {
                   </select>
                 </div>
               </div>
+
+              {/* ================================================= */}
+              {/* PARTIAL PAYMENT AMOUNT */}
+              {/* ================================================= */}
+
+              {paymentStatus === "Partial" && (
+                <div className="mt-4 rounded-xl border border-yellow-200 bg-yellow-50 p-4">
+                  <label className="mb-2 block text-sm font-medium text-slate-700">
+                    Paid Amount
+                  </label>
+
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={paidAmount}
+                    onChange={(e) => setPaidAmount(e.target.value)}
+                    placeholder="Enter paid amount"
+                    required
+                    className="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  />
+
+                  <p className="mt-1 text-xs text-slate-500">
+                    Invoice total: ₹
+                    {Math.round(grandTotal).toLocaleString("en-IN")}
+                  </p>
+
+                  {paidAmount &&
+                    Number(paidAmount) > 0 &&
+                    Number(paidAmount) < Math.round(grandTotal) && (
+                      <p className="mt-2 text-xs font-medium text-yellow-700">
+                        Outstanding after payment: ₹
+                        {(
+                          Math.round(grandTotal) - Number(paidAmount)
+                        ).toLocaleString("en-IN")}
+                      </p>
+                    )}
+                </div>
+              )}
 
               {/* Product */}
               <div className="mt-8">
@@ -453,6 +556,7 @@ export default function BillingPage() {
                     defaultValue=""
                     onChange={(e) => {
                       addProduct(e.target.value);
+
                       e.target.value = "";
                     }}
                     className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500"
@@ -463,7 +567,7 @@ export default function BillingPage() {
                       <option
                         key={product.id}
                         value={product.id}
-                        disabled={product.stock === 0}
+                        disabled={product.stock <= 0}
                       >
                         {product.name} — ₹{product.price} — Stock:{" "}
                         {product.stock}
@@ -487,8 +591,11 @@ export default function BillingPage() {
                         <span className="col-span-2">Product</span>
 
                         <span>Price</span>
+
                         <span>Qty</span>
+
                         <span>GST</span>
+
                         <span className="text-right">Total</span>
                       </div>
 
@@ -579,6 +686,75 @@ export default function BillingPage() {
                     ₹{Math.round(grandTotal).toLocaleString("en-IN")}
                   </span>
                 </div>
+
+                {/* Payment summary */}
+                {paymentStatus === "Partial" &&
+                  paidAmount &&
+                  Number(paidAmount) > 0 && (
+                    <>
+                      <div className="my-4 border-t" />
+
+                      <div className="flex justify-between text-sm">
+                        <span className="text-slate-500">Paid</span>
+
+                        <span className="font-semibold text-green-600">
+                          ₹{Number(paidAmount).toLocaleString("en-IN")}
+                        </span>
+                      </div>
+
+                      <div className="mt-2 flex justify-between text-sm">
+                        <span className="text-slate-500">Outstanding</span>
+
+                        <span className="font-semibold text-red-600">
+                          ₹
+                          {Math.max(
+                            0,
+                            Math.round(grandTotal) - Number(paidAmount),
+                          ).toLocaleString("en-IN")}
+                        </span>
+                      </div>
+                    </>
+                  )}
+
+                {paymentStatus === "Paid" && (
+                  <>
+                    <div className="my-4 border-t" />
+
+                    <div className="flex justify-between text-sm">
+                      <span className="text-slate-500">Paid</span>
+
+                      <span className="font-semibold text-green-600">
+                        ₹{Math.round(grandTotal).toLocaleString("en-IN")}
+                      </span>
+                    </div>
+
+                    <div className="mt-2 flex justify-between text-sm">
+                      <span className="text-slate-500">Outstanding</span>
+
+                      <span className="font-semibold text-green-600">₹0</span>
+                    </div>
+                  </>
+                )}
+
+                {paymentStatus === "Unpaid" && (
+                  <>
+                    <div className="my-4 border-t" />
+
+                    <div className="flex justify-between text-sm">
+                      <span className="text-slate-500">Paid</span>
+
+                      <span className="font-semibold">₹0</span>
+                    </div>
+
+                    <div className="mt-2 flex justify-between text-sm">
+                      <span className="text-slate-500">Outstanding</span>
+
+                      <span className="font-semibold text-red-600">
+                        ₹{Math.round(grandTotal).toLocaleString("en-IN")}
+                      </span>
+                    </div>
+                  </>
+                )}
               </div>
 
               {/* Actions */}
@@ -586,16 +762,18 @@ export default function BillingPage() {
                 <button
                   type="button"
                   onClick={resetForm}
-                  className="flex-1 rounded-lg border border-slate-200 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  disabled={isSubmitting}
+                  className="flex-1 rounded-lg border border-slate-200 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                 >
                   Cancel
                 </button>
 
                 <button
                   type="submit"
-                  className="flex-1 rounded-lg bg-blue-600 py-3 text-sm font-semibold text-white hover:bg-blue-700"
+                  disabled={isSubmitting}
+                  className="flex-1 rounded-lg bg-blue-600 py-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
                 >
-                  Save Invoice
+                  {isSubmitting ? "Saving..." : "Save Invoice"}
                 </button>
               </div>
             </form>

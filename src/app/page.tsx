@@ -54,6 +54,12 @@ const features = [
     description:
       "See sales, purchases, expenses, profit and business performance.",
   },
+  {
+    icon: Sparkles,
+    title: "AI Business Assistant",
+    description:
+      "Ask questions about your sales, purchases, expenses, customers, inventory and payments.",
+  },
 ];
 
 const aiFeatures = [

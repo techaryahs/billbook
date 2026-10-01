@@ -8,11 +8,12 @@ import {
   CheckCircle2,
   Clock3,
   Search,
+  Sparkles,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 type Receivable = {
-  id: number;
+  id: string;
   customer: string;
   invoice: string;
   date: string;
@@ -22,7 +23,7 @@ type Receivable = {
 };
 
 type Payable = {
-  id: number;
+  id: string;
   supplier: string;
   invoice: string;
   date: string;
@@ -31,65 +32,47 @@ type Payable = {
   paid: number;
 };
 
-const initialReceivables: Receivable[] = [
-  {
-    id: 1,
-    customer: "Rahul Sharma",
-    invoice: "INV-001",
-    date: "20 Sep 2026",
-    dueDate: "30 Sep 2026",
-    amount: 5900,
-    paid: 5900,
-  },
-  {
-    id: 2,
-    customer: "Priya Enterprises",
-    invoice: "INV-002",
-    date: "22 Sep 2026",
-    dueDate: "02 Oct 2026",
-    amount: 3540,
-    paid: 0,
-  },
-  {
-    id: 3,
-    customer: "Amit Traders",
-    invoice: "INV-003",
-    date: "24 Sep 2026",
-    dueDate: "04 Oct 2026",
-    amount: 8500,
-    paid: 3000,
-  },
-];
-
-const payables: Payable[] = [
-  {
-    id: 1,
-    supplier: "ABC Suppliers",
-    invoice: "PUR-001",
-    date: "18 Sep 2026",
-    dueDate: "28 Sep 2026",
-    amount: 8750,
-    paid: 3000,
-  },
-  {
-    id: 2,
-    supplier: "Sharma Traders",
-    invoice: "PUR-002",
-    date: "21 Sep 2026",
-    dueDate: "01 Oct 2026",
-    amount: 4200,
-    paid: 0,
-  },
-];
-
 export default function ReceivablesPage() {
   const [activeTab, setActiveTab] = useState<"receivables" | "payables">(
     "receivables",
   );
 
-  const [receivables, setReceivables] = useState(initialReceivables);
+  const [receivables, setReceivables] = useState<Receivable[]>([]);
+
+  const [payables, setPayables] = useState<Payable[]>([]);
 
   const [search, setSearch] = useState("");
+
+  const [isLoading, setIsLoading] = useState(true);
+
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchPayments = async () => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const res = await fetch("/api/payments");
+
+      const json = await res.json();
+
+      if (!res.ok || !json.success) {
+        throw new Error(json.message || "Failed to fetch payments data");
+      }
+
+      setReceivables(json.data.receivables || []);
+
+      setPayables(json.data.payables || []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "An error occurred");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchPayments();
+  }, []);
 
   const totalReceivable = receivables.reduce(
     (sum, item) => sum + (item.amount - item.paid),
@@ -113,25 +96,46 @@ export default function ReceivablesPage() {
       item.invoice.toLowerCase().includes(search.toLowerCase()),
   );
 
-  const recordPayment = (id: number) => {
-    setReceivables((current) =>
-      current.map((item) =>
-        item.id === id
-          ? {
-              ...item,
-              paid: item.amount,
-            }
-          : item,
-      ),
-    );
+  const recordPayment = async (
+    type: "receivable" | "payable",
+    id: string,
+    amount: number,
+  ) => {
+    try {
+      const res = await fetch("/api/payments", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          type,
+          id,
+          amount,
+        }),
+      });
+
+      const json = await res.json();
+
+      if (!res.ok || !json.success) {
+        throw new Error(json.message || "Failed to record payment");
+      }
+
+      await fetchPayments();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to record payment");
+    }
   };
 
   return (
     <main className="min-h-screen bg-slate-50">
-      {/* Header */}
-      
-
       <div className="mx-auto max-w-7xl px-6 py-6">
+        {/* Error */}
+        {error && (
+          <div className="mb-6 rounded-xl border border-red-200 bg-red-50 p-4 text-red-600">
+            {error}
+          </div>
+        )}
+
         {/* Summary */}
         <div className="grid gap-4 md:grid-cols-3">
           <SummaryCard
@@ -139,6 +143,7 @@ export default function ReceivablesPage() {
             value={totalReceivable}
             icon={<ArrowDownLeft size={20} />}
             type="green"
+            isLoading={isLoading}
           />
 
           <SummaryCard
@@ -146,6 +151,7 @@ export default function ReceivablesPage() {
             value={totalPayable}
             icon={<ArrowUpRight size={20} />}
             type="red"
+            isLoading={isLoading}
           />
 
           <SummaryCard
@@ -153,7 +159,51 @@ export default function ReceivablesPage() {
             value={totalReceivable - totalPayable}
             icon={<CheckCircle2 size={20} />}
             type="blue"
+            isLoading={isLoading}
           />
+        </div>
+
+        {/* AI Payment Collection */}
+        <div className="mt-6 overflow-hidden rounded-xl border border-purple-100 bg-gradient-to-r from-purple-50 via-white to-blue-50">
+          <div className="flex flex-col gap-6 p-6 sm:p-7 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-start gap-4">
+              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-purple-600 text-white shadow-sm">
+                <Sparkles size={25} />
+              </div>
+
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-lg font-bold text-slate-900">
+                    AI Payment Collection
+                  </h3>
+
+                  <span className="rounded-full bg-purple-100 px-2.5 py-1 text-[11px] font-semibold text-purple-700">
+                    AI POWERED
+                  </span>
+                </div>
+
+                <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+                  Find customers with outstanding payments, identify overdue
+                  invoices, and prepare personalized payment reminders.
+                </p>
+
+                <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-xs text-slate-500">
+                  <span>✓ Outstanding tracking</span>
+                  <span>✓ Overdue detection</span>
+                  <span>✓ AI reminders</span>
+                  <span>✓ WhatsApp follow-up</span>
+                </div>
+              </div>
+            </div>
+
+            <Link
+              href="/dashboard/payment-collection"
+              className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-purple-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-purple-700"
+            >
+              <Sparkles size={17} />
+              Open Collection Assistant
+            </Link>
+          </div>
         </div>
 
         {/* Tabs */}
@@ -210,77 +260,102 @@ export default function ReceivablesPage() {
                 <thead className="bg-slate-50">
                   <tr className="text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                     <th className="px-6 py-3">Customer</th>
+
                     <th className="px-6 py-3">Invoice</th>
+
                     <th className="px-6 py-3">Date</th>
+
                     <th className="px-6 py-3">Due Date</th>
+
                     <th className="px-6 py-3">Amount</th>
+
                     <th className="px-6 py-3">Outstanding</th>
+
                     <th className="px-6 py-3">Action</th>
                   </tr>
                 </thead>
 
                 <tbody>
-                  {filteredReceivables.map((item) => {
-                    const outstanding = item.amount - item.paid;
+                  {isLoading ? (
+                    <tr>
+                      <td
+                        colSpan={7}
+                        className="px-6 py-12 text-center text-sm text-slate-500"
+                      >
+                        Loading...
+                      </td>
+                    </tr>
+                  ) : filteredReceivables.length === 0 ? (
+                    <tr>
+                      <td colSpan={7}>
+                        <EmptyState message="No receivables found." />
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredReceivables.map((item) => {
+                      const outstanding = item.amount - item.paid;
 
-                    return (
-                      <tr key={item.id} className="border-t text-sm">
-                        <td className="px-6 py-4 font-medium text-slate-900">
-                          {item.customer}
-                        </td>
+                      return (
+                        <tr key={item.id} className="border-t text-sm">
+                          <td className="px-6 py-4 font-medium text-slate-900">
+                            {item.customer}
+                          </td>
 
-                        <td className="px-6 py-4 font-medium text-blue-600">
-                          {item.invoice}
-                        </td>
+                          <td className="px-6 py-4 font-medium text-blue-600">
+                            {item.invoice}
+                          </td>
 
-                        <td className="px-6 py-4 text-slate-600">
-                          {item.date}
-                        </td>
+                          <td className="px-6 py-4 text-slate-600">
+                            {item.date}
+                          </td>
 
-                        <td className="px-6 py-4 text-slate-600">
-                          {item.dueDate}
-                        </td>
+                          <td className="px-6 py-4 text-slate-600">
+                            {item.dueDate}
+                          </td>
 
-                        <td className="px-6 py-4 font-medium">
-                          ₹{item.amount.toLocaleString("en-IN")}
-                        </td>
+                          <td className="px-6 py-4 font-medium">
+                            ₹{item.amount.toLocaleString("en-IN")}
+                          </td>
 
-                        <td className="px-6 py-4">
-                          {outstanding === 0 ? (
-                            <span className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2.5 py-1 text-xs font-semibold text-green-600">
-                              <CheckCircle2 size={13} />
-                              Paid
-                            </span>
-                          ) : (
-                            <span className="font-semibold text-red-600">
-                              ₹{outstanding.toLocaleString("en-IN")}
-                            </span>
-                          )}
-                        </td>
+                          <td className="px-6 py-4">
+                            {outstanding <= 0 ? (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2.5 py-1 text-xs font-semibold text-green-600">
+                                <CheckCircle2 size={13} />
+                                Paid
+                              </span>
+                            ) : (
+                              <span className="font-semibold text-red-600">
+                                ₹{outstanding.toLocaleString("en-IN")}
+                              </span>
+                            )}
+                          </td>
 
-                        <td className="px-6 py-4">
-                          {outstanding > 0 ? (
-                            <button
-                              onClick={() => recordPayment(item.id)}
-                              className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700"
-                            >
-                              Record Payment
-                            </button>
-                          ) : (
-                            <span className="text-xs text-slate-400">
-                              Completed
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
+                          <td className="px-6 py-4">
+                            {outstanding > 0 ? (
+                              <button
+                                onClick={() =>
+                                  recordPayment(
+                                    "receivable",
+                                    item.id,
+                                    outstanding,
+                                  )
+                                }
+                                className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700"
+                              >
+                                Record Payment
+                              </button>
+                            ) : (
+                              <span className="text-xs text-slate-400">
+                                Completed
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
                 </tbody>
               </table>
-
-              {filteredReceivables.length === 0 && (
-                <EmptyState message="No receivables found." />
-              )}
             </div>
           )}
 
@@ -291,67 +366,94 @@ export default function ReceivablesPage() {
                 <thead className="bg-slate-50">
                   <tr className="text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                     <th className="px-6 py-3">Supplier</th>
+
                     <th className="px-6 py-3">Invoice</th>
+
                     <th className="px-6 py-3">Date</th>
+
                     <th className="px-6 py-3">Due Date</th>
+
                     <th className="px-6 py-3">Amount</th>
+
                     <th className="px-6 py-3">Outstanding</th>
-                    <th className="px-6 py-3">Status</th>
+
+                    <th className="px-6 py-3">Action</th>
                   </tr>
                 </thead>
 
                 <tbody>
-                  {filteredPayables.map((item) => {
-                    const outstanding = item.amount - item.paid;
+                  {isLoading ? (
+                    <tr>
+                      <td
+                        colSpan={7}
+                        className="px-6 py-12 text-center text-sm text-slate-500"
+                      >
+                        Loading...
+                      </td>
+                    </tr>
+                  ) : filteredPayables.length === 0 ? (
+                    <tr>
+                      <td colSpan={7}>
+                        <EmptyState message="No payables found." />
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredPayables.map((item) => {
+                      const outstanding = item.amount - item.paid;
 
-                    return (
-                      <tr key={item.id} className="border-t text-sm">
-                        <td className="px-6 py-4 font-medium text-slate-900">
-                          {item.supplier}
-                        </td>
+                      return (
+                        <tr key={item.id} className="border-t text-sm">
+                          <td className="px-6 py-4 font-medium text-slate-900">
+                            {item.supplier}
+                          </td>
 
-                        <td className="px-6 py-4 font-medium text-blue-600">
-                          {item.invoice}
-                        </td>
+                          <td className="px-6 py-4 font-medium text-blue-600">
+                            {item.invoice}
+                          </td>
 
-                        <td className="px-6 py-4 text-slate-600">
-                          {item.date}
-                        </td>
+                          <td className="px-6 py-4 text-slate-600">
+                            {item.date}
+                          </td>
 
-                        <td className="px-6 py-4 text-slate-600">
-                          {item.dueDate}
-                        </td>
+                          <td className="px-6 py-4 text-slate-600">
+                            {item.dueDate}
+                          </td>
 
-                        <td className="px-6 py-4 font-medium">
-                          ₹{item.amount.toLocaleString("en-IN")}
-                        </td>
+                          <td className="px-6 py-4 font-medium">
+                            ₹{item.amount.toLocaleString("en-IN")}
+                          </td>
 
-                        <td className="px-6 py-4 font-semibold text-red-600">
-                          ₹{outstanding.toLocaleString("en-IN")}
-                        </td>
+                          <td className="px-6 py-4 font-semibold text-red-600">
+                            {outstanding <= 0 ? (
+                              <span className="text-green-600">₹0</span>
+                            ) : (
+                              <>₹{outstanding.toLocaleString("en-IN")}</>
+                            )}
+                          </td>
 
-                        <td className="px-6 py-4">
-                          {outstanding === 0 ? (
-                            <span className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2.5 py-1 text-xs font-semibold text-green-600">
-                              <CheckCircle2 size={13} />
-                              Paid
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 rounded-full bg-orange-50 px-2.5 py-1 text-xs font-semibold text-orange-600">
-                              <Clock3 size={13} />
-                              Pending
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
+                          <td className="px-6 py-4">
+                            {outstanding <= 0 ? (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2.5 py-1 text-xs font-semibold text-green-600">
+                                <CheckCircle2 size={13} />
+                                Paid
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() =>
+                                  recordPayment("payable", item.id, outstanding)
+                                }
+                                className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700"
+                              >
+                                Record Payment
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
                 </tbody>
               </table>
-
-              {filteredPayables.length === 0 && (
-                <EmptyState message="No payables found." />
-              )}
             </div>
           )}
         </div>
@@ -365,11 +467,13 @@ function SummaryCard({
   value,
   icon,
   type,
+  isLoading,
 }: {
   title: string;
   value: number;
   icon: React.ReactNode;
   type: "green" | "red" | "blue";
+  isLoading?: boolean;
 }) {
   const styles = {
     green: "bg-green-50 text-green-600",
@@ -386,7 +490,7 @@ function SummaryCard({
       </div>
 
       <p className="mt-3 text-2xl font-bold text-slate-900">
-        ₹{Math.abs(value).toLocaleString("en-IN")}
+        {isLoading ? "..." : `₹${Math.abs(value).toLocaleString("en-IN")}`}
       </p>
     </div>
   );

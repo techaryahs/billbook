@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -11,32 +12,64 @@ import {
   TrendingUp,
 } from "lucide-react";
 
-const monthlySales = [
-  { month: "Apr", sales: 45000, purchases: 28000 },
-  { month: "May", sales: 52000, purchases: 31000 },
-  { month: "Jun", sales: 61000, purchases: 36000 },
-  { month: "Jul", sales: 58000, purchases: 34000 },
-  { month: "Aug", sales: 72000, purchases: 41000 },
-  { month: "Sep", sales: 84500, purchases: 45900 },
-];
+type MonthlySales = { month: string; sales: number; purchases: number };
+
+type SummaryData = {
+  totalSales: number;
+  totalPurchases: number;
+  totalExpenses: number;
+  receivables: number;
+  payables: number;
+  outputGST: number;
+  inputGST: number;
+  monthlySales: MonthlySales[];
+};
 
 export default function ReportsPage() {
-  const totalSales = 84500;
-  const totalPurchases = 45900;
-  const totalExpenses = 30700;
-  const receivables = 9040;
-  const payables = 9950;
+  const [data, setData] = useState<SummaryData | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchSummary = async () => {
+      try {
+        const res = await fetch("/api/reports/summary");
+        const json = await res.json();
+        if (!res.ok || !json.success) {
+          throw new Error(json.message || "Failed to fetch summary data");
+        }
+        setData(json.data);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "An error occurred");
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    fetchSummary();
+  }, []);
+
+  const totalSales = data?.totalSales || 0;
+  const totalPurchases = data?.totalPurchases || 0;
+  const totalExpenses = data?.totalExpenses || 0;
+  const receivables = data?.receivables || 0;
+  const payables = data?.payables || 0;
+  const outputGST = data?.outputGST || 0;
+  const inputGST = data?.inputGST || 0;
+  const monthlySales = data?.monthlySales || [];
 
   const profit = totalSales - totalPurchases - totalExpenses;
-
-  const maxSales = Math.max(...monthlySales.map((item) => item.sales));
+  const maxSales = Math.max(1, ...monthlySales.map((item) => item.sales));
 
   return (
     <main className="min-h-screen bg-slate-50">
-      {/* Header */}
-      
-
       <div className="mx-auto max-w-7xl px-6 py-6">
+        
+        {error && (
+          <div className="mb-6 rounded-xl border border-red-200 bg-red-50 p-4 text-red-600">
+            {error}
+          </div>
+        )}
+
         {/* Main Stats */}
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <ReportCard
@@ -44,6 +77,7 @@ export default function ReportsPage() {
             value={totalSales}
             icon={<ArrowDownLeft size={20} />}
             type="green"
+            isLoading={isLoading}
           />
 
           <ReportCard
@@ -51,6 +85,7 @@ export default function ReportsPage() {
             value={totalPurchases}
             icon={<ArrowUpRight size={20} />}
             type="blue"
+            isLoading={isLoading}
           />
 
           <ReportCard
@@ -58,6 +93,7 @@ export default function ReportsPage() {
             value={totalExpenses}
             icon={<FileText size={20} />}
             type="orange"
+            isLoading={isLoading}
           />
 
           <ReportCard
@@ -65,6 +101,7 @@ export default function ReportsPage() {
             value={profit}
             icon={<TrendingUp size={20} />}
             type="purple"
+            isLoading={isLoading}
           />
         </div>
 
@@ -77,7 +114,6 @@ export default function ReportsPage() {
 
             <div>
               <h2 className="font-semibold text-slate-900">Sales Overview</h2>
-
               <p className="text-sm text-slate-500">
                 Monthly sales and purchases
               </p>
@@ -86,39 +122,47 @@ export default function ReportsPage() {
 
           <div className="mt-8">
             <div className="flex h-64 items-end gap-3 sm:gap-6">
-              {monthlySales.map((item) => {
-                const salesHeight = (item.sales / maxSales) * 100;
-                const purchaseHeight = (item.purchases / maxSales) * 100;
+              {isLoading ? (
+                <div className="flex h-full w-full items-center justify-center text-sm text-slate-500">
+                  Loading chart...
+                </div>
+              ) : monthlySales.length === 0 ? (
+                <div className="flex h-full w-full items-center justify-center text-sm text-slate-500">
+                  No data for the past months.
+                </div>
+              ) : (
+                monthlySales.map((item) => {
+                  const salesHeight = (item.sales / maxSales) * 100;
+                  const purchaseHeight = (item.purchases / maxSales) * 100;
 
-                return (
-                  <div
-                    key={item.month}
-                    className="flex flex-1 items-end justify-center gap-1"
-                  >
-                    <div className="flex h-full flex-col items-center justify-end">
-                      <div
-                        className="w-5 rounded-t-md bg-blue-600 transition hover:bg-blue-700 sm:w-8"
-                        style={{ height: `${salesHeight}%` }}
-                        title={`Sales ₹${item.sales.toLocaleString("en-IN")}`}
-                      />
+                  return (
+                    <div
+                      key={item.month}
+                      className="flex flex-1 items-end justify-center gap-1"
+                    >
+                      <div className="flex h-full flex-col items-center justify-end">
+                        <div
+                          className="w-5 rounded-t-md bg-blue-600 transition hover:bg-blue-700 sm:w-8"
+                          style={{ height: `${salesHeight}%` }}
+                          title={`Sales ₹${item.sales.toLocaleString("en-IN")}`}
+                        />
 
-                      <span className="mt-2 text-xs text-slate-500">
-                        {item.month}
-                      </span>
+                        <span className="mt-2 text-xs text-slate-500">
+                          {item.month}
+                        </span>
+                      </div>
+
+                      <div className="flex h-full items-end">
+                        <div
+                          className="w-5 rounded-t-md bg-slate-200 sm:w-8"
+                          style={{ height: `${purchaseHeight}%` }}
+                          title={`Purchases ₹${item.purchases.toLocaleString("en-IN")}`}
+                        />
+                      </div>
                     </div>
-
-                    <div className="flex h-full items-end">
-                      <div
-                        className="w-5 rounded-t-md bg-slate-200 sm:w-8"
-                        style={{ height: `${purchaseHeight}%` }}
-                        title={`Purchases ₹${item.purchases.toLocaleString(
-                          "en-IN",
-                        )}`}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })
+              )}
             </div>
 
             <div className="mt-6 flex justify-center gap-6 text-xs text-slate-500">
@@ -146,20 +190,17 @@ export default function ReportsPage() {
 
               <div>
                 <h2 className="font-semibold text-slate-900">Profit & Loss</h2>
-
                 <p className="text-sm text-slate-500">Current period</p>
               </div>
             </div>
 
             <div className="mt-6 space-y-4">
-              <SummaryRow label="Sales" value={totalSales} positive />
-
-              <SummaryRow label="Purchases" value={totalPurchases} />
-
-              <SummaryRow label="Expenses" value={totalExpenses} />
+              <SummaryRow label="Sales" value={totalSales} positive isLoading={isLoading} />
+              <SummaryRow label="Purchases" value={totalPurchases} isLoading={isLoading} />
+              <SummaryRow label="Expenses" value={totalExpenses} isLoading={isLoading} />
 
               <div className="border-t pt-4">
-                <SummaryRow label="Net Profit" value={profit} positive bold />
+                <SummaryRow label="Net Profit" value={profit} positive bold isLoading={isLoading} />
               </div>
             </div>
           </div>
@@ -175,21 +216,20 @@ export default function ReportsPage() {
                 <h2 className="font-semibold text-slate-900">
                   Outstanding Summary
                 </h2>
-
                 <p className="text-sm text-slate-500">Money movement</p>
               </div>
             </div>
 
             <div className="mt-6 space-y-4">
-              <SummaryRow label="Receivables" value={receivables} positive />
-
-              <SummaryRow label="Payables" value={payables} />
+              <SummaryRow label="Receivables" value={receivables} positive isLoading={isLoading} />
+              <SummaryRow label="Payables" value={payables} isLoading={isLoading} />
 
               <div className="border-t pt-4">
                 <SummaryRow
                   label="Net Outstanding"
                   value={receivables - payables}
                   bold
+                  isLoading={isLoading}
                 />
               </div>
             </div>
@@ -205,7 +245,6 @@ export default function ReportsPage() {
 
             <div>
               <h2 className="font-semibold text-slate-900">GST Summary</h2>
-
               <p className="text-sm text-slate-500">GST collected and paid</p>
             </div>
           </div>
@@ -213,20 +252,23 @@ export default function ReportsPage() {
           <div className="mt-6 grid gap-4 sm:grid-cols-3">
             <GSTCard
               title="Output GST"
-              value={12850}
+              value={outputGST}
               description="GST collected from sales"
+              isLoading={isLoading}
             />
 
             <GSTCard
               title="Input GST"
-              value={7650}
+              value={inputGST}
               description="GST paid on purchases"
+              isLoading={isLoading}
             />
 
             <GSTCard
               title="Net GST"
-              value={5200}
+              value={outputGST - inputGST}
               description="Output GST − Input GST"
+              isLoading={isLoading}
             />
           </div>
         </div>
@@ -240,11 +282,13 @@ function ReportCard({
   value,
   icon,
   type,
+  isLoading,
 }: {
   title: string;
   value: number;
   icon: React.ReactNode;
   type: "green" | "blue" | "orange" | "purple";
+  isLoading: boolean;
 }) {
   const styles = {
     green: "bg-green-50 text-green-600",
@@ -257,12 +301,11 @@ function ReportCard({
     <div className="rounded-xl border bg-white p-5">
       <div className="flex items-center justify-between">
         <p className="text-sm text-slate-500">{title}</p>
-
         <div className={`rounded-lg p-2 ${styles[type]}`}>{icon}</div>
       </div>
 
       <p className="mt-3 text-2xl font-bold text-slate-900">
-        ₹{value.toLocaleString("en-IN")}
+        {isLoading ? "..." : `₹${value.toLocaleString("en-IN")}`}
       </p>
     </div>
   );
@@ -273,11 +316,13 @@ function SummaryRow({
   value,
   positive = false,
   bold = false,
+  isLoading = false,
 }: {
   label: string;
   value: number;
   positive?: boolean;
   bold?: boolean;
+  isLoading?: boolean;
 }) {
   return (
     <div className="flex items-center justify-between">
@@ -298,7 +343,7 @@ function SummaryRow({
               : "font-medium text-slate-700"
         }`}
       >
-        ₹{value.toLocaleString("en-IN")}
+        {isLoading ? "..." : `₹${value.toLocaleString("en-IN")}`}
       </span>
     </div>
   );
@@ -308,17 +353,19 @@ function GSTCard({
   title,
   value,
   description,
+  isLoading,
 }: {
   title: string;
   value: number;
   description: string;
+  isLoading: boolean;
 }) {
   return (
     <div className="rounded-lg border border-slate-100 bg-slate-50 p-4">
       <p className="text-sm font-medium text-slate-700">{title}</p>
 
       <p className="mt-2 text-xl font-bold text-slate-900">
-        ₹{value.toLocaleString("en-IN")}
+        {isLoading ? "..." : `₹${value.toLocaleString("en-IN")}`}
       </p>
 
       <p className="mt-1 text-xs text-slate-500">{description}</p>

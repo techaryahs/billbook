@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import Link from "next/link";
 import {
   AlertTriangle,
@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 
 type Product = {
-  id: number;
+  id: string;
   name: string;
   sku: string;
   category: string;
@@ -24,7 +24,7 @@ type Product = {
 };
 
 type Movement = {
-  id: number;
+  id: string;
   product: string;
   type: "IN" | "OUT";
   quantity: number;
@@ -32,86 +32,34 @@ type Movement = {
   reference: string;
 };
 
-const products: Product[] = [
-  {
-    id: 1,
-    name: "ABC Product",
-    sku: "ABC001",
-    category: "General",
-    stock: 25,
-    purchasePrice: 350,
-    sellingPrice: 500,
-    minimumStock: 10,
-  },
-  {
-    id: 2,
-    name: "Premium Product",
-    sku: "PREM001",
-    category: "Premium",
-    stock: 12,
-    purchasePrice: 850,
-    sellingPrice: 1200,
-    minimumStock: 10,
-  },
-  {
-    id: 3,
-    name: "Office Chair",
-    sku: "CHR001",
-    category: "Furniture",
-    stock: 4,
-    purchasePrice: 2500,
-    sellingPrice: 3500,
-    minimumStock: 5,
-  },
-  {
-    id: 4,
-    name: "USB Cable",
-    sku: "USB001",
-    category: "Accessories",
-    stock: 0,
-    purchasePrice: 80,
-    sellingPrice: 150,
-    minimumStock: 10,
-  },
-];
-
-const movements: Movement[] = [
-  {
-    id: 1,
-    product: "ABC Product",
-    type: "IN",
-    quantity: 10,
-    date: "26 Sep 2026",
-    reference: "PUR-001",
-  },
-  {
-    id: 2,
-    product: "Premium Product",
-    type: "OUT",
-    quantity: 3,
-    date: "26 Sep 2026",
-    reference: "INV-004",
-  },
-  {
-    id: 3,
-    product: "Office Chair",
-    type: "IN",
-    quantity: 5,
-    date: "25 Sep 2026",
-    reference: "PUR-002",
-  },
-  {
-    id: 4,
-    product: "USB Cable",
-    type: "OUT",
-    quantity: 10,
-    date: "25 Sep 2026",
-    reference: "INV-003",
-  },
-];
-
 export default function InventoryPage() {
+  const [products, setProducts] = useState<Product[]>([]);
+  const [movements, setMovements] = useState<Movement[]>([]);
   const [search, setSearch] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchInventory = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/inventory");
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.message || "Failed to fetch inventory");
+      }
+      setProducts(json.data.products || []);
+      setMovements(json.data.movements || []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "An error occurred");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchInventory();
+  }, []);
 
   const filteredProducts = useMemo(() => {
     const value = search.toLowerCase();
@@ -119,15 +67,15 @@ export default function InventoryPage() {
     return products.filter(
       (product) =>
         product.name.toLowerCase().includes(value) ||
-        product.sku.toLowerCase().includes(value) ||
-        product.category.toLowerCase().includes(value),
+        (product.sku && product.sku.toLowerCase().includes(value)) ||
+        (product.category && product.category.toLowerCase().includes(value)),
     );
-  }, [search]);
+  }, [search, products]);
 
-  const totalUnits = products.reduce((sum, product) => sum + product.stock, 0);
+  const totalUnits = products.reduce((sum, product) => sum + (product.stock || 0), 0);
 
   const stockValue = products.reduce(
-    (sum, product) => sum + product.stock * product.purchasePrice,
+    (sum, product) => sum + (product.stock || 0) * (product.purchasePrice || 0),
     0,
   );
 
@@ -135,43 +83,47 @@ export default function InventoryPage() {
     (product) => product.stock > 0 && product.stock <= product.minimumStock,
   );
 
-  const outOfStock = products.filter((product) => product.stock === 0);
+  const outOfStock = products.filter((product) => product.stock <= 0);
 
   return (
     <main className="min-h-screen bg-slate-50">
-      {/* Header */}
-      
-
       <div className="mx-auto max-w-7xl px-6 py-6">
+        
+        {error && (
+          <div className="mb-6 rounded-xl border border-red-200 bg-red-50 p-4 text-red-600">
+            {error}
+          </div>
+        )}
+
         {/* Summary */}
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <StatCard
             title="Total Products"
-            value={products.length.toString()}
+            value={isLoading ? "..." : products.length.toString()}
             icon={<Package size={20} />}
           />
 
           <StatCard
             title="Total Units"
-            value={totalUnits.toLocaleString("en-IN")}
+            value={isLoading ? "..." : totalUnits.toLocaleString("en-IN")}
             icon={<Boxes size={20} />}
           />
 
           <StatCard
             title="Stock Value"
-            value={`₹${stockValue.toLocaleString("en-IN")}`}
+            value={isLoading ? "..." : `₹${stockValue.toLocaleString("en-IN")}`}
             icon={<ArrowUp size={20} />}
           />
 
           <StatCard
             title="Low / Out of Stock"
-            value={`${lowStock.length + outOfStock.length}`}
+            value={isLoading ? "..." : `${lowStock.length + outOfStock.length}`}
             icon={<AlertTriangle size={20} />}
           />
         </div>
 
         {/* Alerts */}
-        {(lowStock.length > 0 || outOfStock.length > 0) && (
+        {!isLoading && (lowStock.length > 0 || outOfStock.length > 0) && (
           <div className="mt-6 rounded-xl border border-yellow-200 bg-yellow-50 p-5">
             <div className="flex gap-3">
               <AlertTriangle size={21} className="mt-0.5 text-yellow-600" />
@@ -229,57 +181,76 @@ export default function InventoryPage() {
               <span>Status</span>
             </div>
 
-            {filteredProducts.map((product) => {
-              const isOut = product.stock === 0;
-              const isLow =
-                product.stock > 0 && product.stock <= product.minimumStock;
+            {isLoading ? (
+              <div className="px-6 py-16 text-center">
+                <div className="mx-auto h-8 w-8 animate-spin rounded-full border-b-2 border-blue-600"></div>
+                <p className="mt-4 text-sm text-slate-500">Loading inventory...</p>
+              </div>
+            ) : filteredProducts.length === 0 ? (
+              <div className="px-6 py-16 text-center">
+                <Package size={40} className="mx-auto text-slate-300" />
+                <h3 className="mt-4 font-semibold text-slate-900">
+                  {search ? "No matching products found" : "No products found"}
+                </h3>
+                <p className="mt-1 text-sm text-slate-500">
+                  {search
+                    ? "Try a different search term"
+                    : "Add products to see them in your inventory."}
+                </p>
+              </div>
+            ) : (
+              filteredProducts.map((product) => {
+                const isOut = product.stock <= 0;
+                const isLow =
+                  product.stock > 0 && product.stock <= product.minimumStock;
 
-              return (
-                <div
-                  key={product.id}
-                  className="grid gap-3 border-b px-6 py-4 last:border-b-0 md:grid-cols-6 md:items-center"
-                >
-                  <div>
-                    <p className="font-semibold text-slate-900">
-                      {product.name}
-                    </p>
+                return (
+                  <div
+                    key={product.id}
+                    className="grid gap-3 border-b px-6 py-4 last:border-b-0 md:grid-cols-6 md:items-center"
+                  >
+                    <div>
+                      <p className="font-semibold text-slate-900">
+                        {product.name}
+                      </p>
+                    </div>
+
+                    <div className="text-sm text-slate-600">{product.sku || "—"}</div>
+
+                    <div className="text-sm text-slate-600">
+                      {product.category || "General"}
+                    </div>
+
+                    <div className="font-semibold text-slate-900">
+                      {product.stock} units
+                    </div>
+
+                    <div className="text-sm text-slate-600">
+                      ₹
+                      {(product.stock * product.purchasePrice).toLocaleString(
+                        "en-IN",
+                      )}
+                    </div>
+
+                    <div>
+                      {isOut ? (
+                        <span className="rounded-full bg-red-50 px-3 py-1 text-xs font-semibold text-red-600">
+                          Out of stock
+                        </span>
+                      ) : isLow ? (
+                        <span className="rounded-full bg-yellow-50 px-3 py-1 text-xs font-semibold text-yellow-700">
+                          Low stock
+                        </span>
+                      ) : (
+                        <span className="rounded-full bg-green-50 px-3 py-1 text-xs font-semibold text-green-600">
+                          In stock
+                        </span>
+                      )}
+                    </div>
                   </div>
-
-                  <div className="text-sm text-slate-600">{product.sku}</div>
-
-                  <div className="text-sm text-slate-600">
-                    {product.category}
-                  </div>
-
-                  <div className="font-semibold text-slate-900">
-                    {product.stock} units
-                  </div>
-
-                  <div className="text-sm text-slate-600">
-                    ₹
-                    {(product.stock * product.purchasePrice).toLocaleString(
-                      "en-IN",
-                    )}
-                  </div>
-
-                  <div>
-                    {isOut ? (
-                      <span className="rounded-full bg-red-50 px-3 py-1 text-xs font-semibold text-red-600">
-                        Out of stock
-                      </span>
-                    ) : isLow ? (
-                      <span className="rounded-full bg-yellow-50 px-3 py-1 text-xs font-semibold text-yellow-700">
-                        Low stock
-                      </span>
-                    ) : (
-                      <span className="rounded-full bg-green-50 px-3 py-1 text-xs font-semibold text-green-600">
-                        In stock
-                      </span>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+                );
+              })
+            )}
           </div>
         </section>
 
@@ -296,45 +267,65 @@ export default function InventoryPage() {
           </div>
 
           <div className="overflow-hidden rounded-xl border bg-white">
-            {movements.map((movement) => (
-              <div
-                key={movement.id}
-                className="flex items-center justify-between border-b px-6 py-4 last:border-b-0"
-              >
-                <div className="flex items-center gap-4">
+            {isLoading ? (
+              <div className="px-6 py-16 text-center">
+                <div className="mx-auto h-8 w-8 animate-spin rounded-full border-b-2 border-blue-600"></div>
+                <p className="mt-4 text-sm text-slate-500">Loading movements...</p>
+              </div>
+            ) : movements.length === 0 ? (
+              <div className="px-6 py-16 text-center">
+                <h3 className="font-semibold text-slate-900">
+                  No stock movements
+                </h3>
+                <p className="mt-1 text-sm text-slate-500">
+                  Record purchases or sales to see inventory movements here.
+                </p>
+              </div>
+            ) : (
+              movements.map((movement) => (
+                <div
+                  key={movement.id}
+                  className="flex items-center justify-between border-b px-6 py-4 last:border-b-0"
+                >
+                  <div className="flex items-center gap-4">
+                    <div
+                      className={`flex h-10 w-10 items-center justify-center rounded-full ${
+                        movement.type === "IN" ? "bg-green-50" : "bg-red-50"
+                      }`}
+                    >
+                      {movement.type === "IN" ? (
+                        <ArrowDown size={18} className="text-green-600" />
+                      ) : (
+                        <ArrowUp size={18} className="text-red-600" />
+                      )}
+                    </div>
+
+                    <div>
+                      <p className="font-medium text-slate-900">
+                        {movement.product}
+                      </p>
+
+                      <p className="text-xs text-slate-500">
+                        {movement.reference} · {new Intl.DateTimeFormat("en-IN", {
+                          day: "2-digit",
+                          month: "short",
+                          year: "numeric",
+                        }).format(new Date(movement.date))}
+                      </p>
+                    </div>
+                  </div>
+
                   <div
-                    className={`flex h-10 w-10 items-center justify-center rounded-full ${
-                      movement.type === "IN" ? "bg-green-50" : "bg-red-50"
+                    className={`font-semibold ${
+                      movement.type === "IN" ? "text-green-600" : "text-red-600"
                     }`}
                   >
-                    {movement.type === "IN" ? (
-                      <ArrowDown size={18} className="text-green-600" />
-                    ) : (
-                      <ArrowUp size={18} className="text-red-600" />
-                    )}
-                  </div>
-
-                  <div>
-                    <p className="font-medium text-slate-900">
-                      {movement.product}
-                    </p>
-
-                    <p className="text-xs text-slate-500">
-                      {movement.reference} · {movement.date}
-                    </p>
+                    {movement.type === "IN" ? "+" : "-"}
+                    {movement.quantity}
                   </div>
                 </div>
-
-                <div
-                  className={`font-semibold ${
-                    movement.type === "IN" ? "text-green-600" : "text-red-600"
-                  }`}
-                >
-                  {movement.type === "IN" ? "+" : "-"}
-                  {movement.quantity}
-                </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </section>
       </div>
