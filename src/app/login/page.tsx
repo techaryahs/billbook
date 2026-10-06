@@ -121,12 +121,12 @@ export default function LoginPage() {
                   Password
                 </label>
 
-                <button
-                  type="button"
+                <Link
+                  href="/forgot-password"
                   className="text-xs font-medium text-blue-600 hover:underline"
                 >
                   Forgot password?
-                </button>
+                </Link>
               </div>
 
               <div className="relative">
@@ -160,7 +160,7 @@ export default function LoginPage() {
 
           {/* Register */}
           <p className="mt-6 text-center text-sm text-slate-500">
-            Don't have an account?{" "}
+            Don&apos;t have an account?{" "}
             <Link
               href="/register"
               className="font-semibold text-blue-600 hover:underline"

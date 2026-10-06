@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
-import { FileText, Plus, Search, Trash2 } from "lucide-react";
+import { FileText, Plus, Search, Trash2, Check, ChevronsUpDown, X, MoreVertical, Eye, Edit2 } from "lucide-react";
+import { useRef } from "react";
 
 type Customer = {
   id: string;
@@ -34,7 +35,7 @@ type Invoice = {
   customer: string;
   date: string;
   total: number;
-  status: "Paid" | "Unpaid" | "Partial";
+  status: "Paid" | "Unpaid" | "Partial" | "Cancelled" | "Sent" | "Draft";
 };
 
 export default function BillingPage() {
@@ -46,9 +47,12 @@ export default function BillingPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [showForm, setShowForm] = useState(false);
+  const [isViewing, setIsViewing] = useState(false);
+  const [viewingInvoice, setViewingInvoice] = useState<any>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [customerId, setCustomerId] = useState("");
+  const [showAddCustomerModal, setShowAddCustomerModal] = useState(false);
   const [invoiceDate, setInvoiceDate] = useState("");
 
   const [paymentStatus, setPaymentStatus] =
@@ -58,6 +62,10 @@ export default function BillingPage() {
   const [paidAmount, setPaidAmount] = useState("");
 
   const [items, setItems] = useState<InvoiceItem[]>([]);
+
+  const [editingInvoiceId, setEditingInvoiceId] = useState<string | null>(null);
+  const [editingInvoiceNo, setEditingInvoiceNo] = useState<string | null>(null);
+  const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
 
   const fetchBillingData = async () => {
     setIsLoading(true);
@@ -84,6 +92,27 @@ export default function BillingPage() {
   useEffect(() => {
     fetchBillingData();
   }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setActiveMenuId(null);
+        if (isViewing) setIsViewing(false);
+      }
+    };
+    const handleClickOutside = () => setActiveMenuId(null);
+    
+    if (activeMenuId || isViewing) {
+      document.addEventListener("keydown", handleKeyDown);
+    }
+    if (activeMenuId) {
+      document.addEventListener("click", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("click", handleClickOutside);
+    };
+  }, [activeMenuId, isViewing]);
 
   const subtotal = useMemo(
     () => items.reduce((sum, item) => sum + item.quantity * item.price, 0),
@@ -205,17 +234,18 @@ export default function BillingPage() {
     setIsSubmitting(true);
 
     try {
-      const res = await fetch("/api/invoices/create", {
-        method: "POST",
+      const url = editingInvoiceId ? `/api/invoices/${editingInvoiceId}` : "/api/invoices/create";
+      const method = editingInvoiceId ? "PUT" : "POST";
+
+      const res = await fetch(url, {
+        method,
         headers: {
           "Content-Type": "application/json",
         },
 
         body: JSON.stringify({
           customerId,
-
           invoiceDate,
-
           paymentStatus,
 
           // NEW: Send correct paid amount
@@ -227,13 +257,9 @@ export default function BillingPage() {
                 : 0,
 
           items,
-
-          invoiceNo: `INV-${String(invoices.length + 1).padStart(3, "0")}`,
-
+          invoiceNo: editingInvoiceNo || `INV-${String(invoices.length + 1).padStart(3, "0")}`,
           subtotal,
-
           gstAmount,
-
           total: roundedGrandTotal,
         }),
       });
@@ -241,7 +267,7 @@ export default function BillingPage() {
       const json = await res.json();
 
       if (!res.ok || !json.success) {
-        throw new Error(json.message || "Failed to create invoice");
+        throw new Error(json.message || `Failed to ${editingInvoiceId ? "update" : "create"} invoice`);
       }
 
       await fetchBillingData();
@@ -258,12 +284,69 @@ export default function BillingPage() {
     setCustomerId("");
     setInvoiceDate("");
     setPaymentStatus("Unpaid");
-
-    // NEW: Reset paid amount
     setPaidAmount("");
-
     setItems([]);
+    setEditingInvoiceId(null);
+    setEditingInvoiceNo(null);
     setShowForm(false);
+  };
+
+  const openViewForm = async (invoiceId: string) => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/invoices/${invoiceId}`);
+      const json = await res.json();
+      if (!res.ok || !json.success) throw new Error(json.message || "Failed to fetch invoice details");
+      
+      setViewingInvoice(json.data);
+      setIsViewing(true);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to load invoice for viewing.");
+    } finally {
+      setIsLoading(false);
+      setActiveMenuId(null);
+    }
+  };
+
+  const openEditForm = async (invoiceId: string) => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/invoices/${invoiceId}`);
+      const json = await res.json();
+      if (!res.ok || !json.success) throw new Error(json.message || "Failed to fetch invoice details");
+      
+      const inv = json.data;
+      setEditingInvoiceId(inv.id);
+      setEditingInvoiceNo(inv.invoiceNumber);
+      
+      setCustomerId(inv.customerId || "");
+      setInvoiceDate(inv.invoiceDate ? new Date(inv.invoiceDate).toISOString().split('T')[0] : "");
+      
+      let mappedStatus: Invoice["status"] = "Unpaid";
+      if (inv.status === "PAID") mappedStatus = "Paid";
+      else if (inv.status === "PARTIALLY_PAID") mappedStatus = "Partial";
+      setPaymentStatus(mappedStatus);
+      
+      setPaidAmount(inv.paidAmount ? String(inv.paidAmount) : "");
+      
+      setItems(inv.items.map((item: any) => ({
+        id: item.id || Date.now() + Math.random(),
+        productId: item.productId,
+        productName: item.productName,
+        quantity: Number(item.quantity),
+        price: Number(item.unitPrice),
+        gst: Number(item.gstRate),
+      })));
+      
+      setShowForm(true);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to load invoice for editing.");
+    } finally {
+      setIsLoading(false);
+      setActiveMenuId(null);
+    }
   };
 
   const totalSales = invoices.reduce((sum, invoice) => sum + invoice.total, 0);
@@ -330,13 +413,14 @@ export default function BillingPage() {
         </div>
 
         {/* Invoice List */}
-        <div className="overflow-hidden rounded-xl border bg-white">
-          <div className="hidden grid-cols-5 border-b bg-slate-50 px-6 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500 md:grid">
-            <span>Invoice</span>
-            <span>Customer</span>
-            <span>Date</span>
-            <span>Status</span>
-            <span className="text-right">Amount</span>
+        <div className="rounded-xl border bg-white">
+          <div className="hidden grid-cols-6 border-b bg-slate-50 rounded-t-xl px-6 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500 md:grid">
+            <span className="col-span-1">Invoice</span>
+            <span className="col-span-1">Customer</span>
+            <span className="col-span-1">Date</span>
+            <span className="col-span-1">Status</span>
+            <span className="col-span-1 text-right">Amount</span>
+            <span className="col-span-1 text-right">Action</span>
           </div>
 
           {isLoading ? (
@@ -358,10 +442,13 @@ export default function BillingPage() {
               </p>
             </div>
           ) : (
-            invoices.map((invoice) => (
+            invoices.map((invoice, index) => {
+              const isNearBottom = index >= invoices.length - 2 && invoices.length > 2;
+              
+              return (
               <div
                 key={invoice.id}
-                className="grid gap-3 border-b px-6 py-4 last:border-b-0 md:grid-cols-5 md:items-center"
+                className="grid gap-3 border-b px-6 py-4 last:border-b-0 last:rounded-b-xl md:grid-cols-6 md:items-center relative"
               >
                 <div className="flex items-center gap-2">
                   <FileText size={17} className="text-blue-600" />
@@ -390,7 +477,9 @@ export default function BillingPage() {
                         ? "bg-green-50 text-green-600"
                         : invoice.status === "Partial"
                           ? "bg-yellow-50 text-yellow-700"
-                          : "bg-red-50 text-red-600"
+                          : invoice.status === "Cancelled"
+                            ? "bg-slate-100 text-slate-600"
+                            : "bg-red-50 text-red-600"
                     }`}
                   >
                     {invoice.status}
@@ -400,8 +489,51 @@ export default function BillingPage() {
                 <div className="font-semibold text-slate-900 md:text-right">
                   ₹{invoice.total.toLocaleString("en-IN")}
                 </div>
+
+                <div className="flex items-center justify-end">
+                  <div className="relative">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setActiveMenuId(activeMenuId === invoice.id ? null : invoice.id);
+                      }}
+                      className="p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-blue-100"
+                    >
+                      <MoreVertical size={18} />
+                    </button>
+
+                    {activeMenuId === invoice.id && (
+                      <div 
+                        className={`absolute right-0 z-50 w-40 rounded-lg border border-slate-200 bg-white shadow-lg shadow-slate-200/50 ${isNearBottom ? 'bottom-full mb-1' : 'top-full mt-1'}`}
+                        onMouseLeave={() => setActiveMenuId(null)}
+                      >
+                        <div className="p-1">
+                          <button
+                            onClick={() => {
+                              setActiveMenuId(null);
+                              openEditForm(invoice.id);
+                            }}
+                            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-50 hover:text-blue-600 transition-colors"
+                          >
+                            <Edit2 size={16} /> Edit Invoice
+                          </button>
+                          
+                          <button
+                            onClick={() => {
+                              setActiveMenuId(null);
+                              openViewForm(invoice.id);
+                            }}
+                            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-50 hover:text-blue-600 transition-colors"
+                          >
+                            <Eye size={16} /> View Invoice
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
-            ))
+            )})
           )}
         </div>
       </div>
@@ -414,11 +546,11 @@ export default function BillingPage() {
             <div className="sticky top-0 z-10 flex items-center justify-between border-b bg-white px-6 py-4">
               <div>
                 <h2 className="text-lg font-bold text-slate-900">
-                  Create Invoice
+                  {editingInvoiceId ? `Edit Invoice #${editingInvoiceNo}` : "Create Invoice"}
                 </h2>
 
                 <p className="text-sm text-slate-500">
-                  Create a GST or non-GST sales invoice
+                  {editingInvoiceId ? "Modify your existing invoice" : "Create a GST or non-GST sales invoice"}
                 </p>
               </div>
 
@@ -435,25 +567,13 @@ export default function BillingPage() {
               {/* Customer / Date / Payment Status */}
               <div className="grid gap-4 md:grid-cols-3">
                 {/* Customer */}
-                <div>
-                  <label className="mb-2 block text-sm font-medium text-slate-700">
-                    Customer
-                  </label>
-
-                  <select
+                <div className="relative">
+                  <CustomerSelectDropdown
+                    customers={customers}
                     value={customerId}
-                    onChange={(e) => setCustomerId(e.target.value)}
-                    required
-                    className="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                  >
-                    <option value="">Select customer</option>
-
-                    {customers.map((customer) => (
-                      <option key={customer.id} value={customer.id}>
-                        {customer.name}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={setCustomerId}
+                    onAddCustomer={() => setShowAddCustomerModal(true)}
+                  />
                 </div>
 
                 {/* Invoice Date */}
@@ -773,13 +893,213 @@ export default function BillingPage() {
                   disabled={isSubmitting}
                   className="flex-1 rounded-lg bg-blue-600 py-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
                 >
-                  {isSubmitting ? "Saving..." : "Save Invoice"}
+                  {isSubmitting ? (editingInvoiceId ? "Updating..." : "Saving...") : (editingInvoiceId ? "Update Invoice" : "Save Invoice")}
                 </button>
               </div>
             </form>
           </div>
         </div>
       )}
+      {/* Add Customer Modal */}
+      {showAddCustomerModal && (
+        <AddCustomerModal 
+          customers={customers}
+          onClose={() => setShowAddCustomerModal(false)}
+          onSuccess={(newCustomer: Customer) => {
+            setCustomers((prev) => [newCustomer, ...prev]);
+            setCustomerId(newCustomer.id);
+            setShowAddCustomerModal(false);
+          }}
+        />
+      )}
+      {/* View Invoice Modal */}
+      {isViewing && viewingInvoice && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 px-4 py-6 backdrop-blur-sm sm:px-6">
+          <div className="flex h-full w-full max-w-4xl flex-col rounded-2xl bg-slate-50 shadow-2xl">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b bg-white px-6 py-4 rounded-t-2xl">
+              <div>
+                <h2 className="text-xl font-bold text-slate-900">
+                  Invoice Preview
+                </h2>
+                <p className="text-sm text-slate-500">
+                  {viewingInvoice.invoiceNumber}
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setIsViewing(false);
+                  setViewingInvoice(null);
+                }}
+                className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
+                title="Close"
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            {/* Document Body */}
+            <div className="flex-1 overflow-y-auto p-6 md:p-8">
+              <div className="mx-auto w-full max-w-3xl rounded-xl bg-white p-8 shadow-sm ring-1 ring-slate-200">
+                {/* Invoice Top */}
+                <div className="flex flex-col justify-between border-b pb-8 sm:flex-row sm:items-start">
+                  <div>
+                    <h1 className="text-3xl font-black tracking-tight text-slate-900">
+                      {viewingInvoice.business?.name || "ARYAHS"}
+                    </h1>
+                    <p className="mt-1 text-sm text-slate-500 font-medium">
+                      Business Manager
+                    </p>
+                    {viewingInvoice.business?.email && <p className="text-sm text-slate-500 mt-2">{viewingInvoice.business.email}</p>}
+                    {viewingInvoice.business?.phone && <p className="text-sm text-slate-500">{viewingInvoice.business.phone}</p>}
+                  </div>
+                  <div className="mt-6 text-left sm:mt-0 sm:text-right">
+                    <h2 className="text-xl font-bold text-slate-800">INVOICE</h2>
+                    <p className="mt-1 text-sm font-medium text-slate-900">
+                      #{viewingInvoice.invoiceNumber}
+                    </p>
+                    <p className="text-sm text-slate-500 mt-1">
+                      Date: {new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(viewingInvoice.invoiceDate))}
+                    </p>
+                    {viewingInvoice.dueDate && (
+                      <p className="text-sm text-slate-500">
+                        Due: {new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(viewingInvoice.dueDate))}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Bill To */}
+                <div className="mt-8">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3">
+                    Bill To
+                  </h3>
+                  <div className="text-sm">
+                    <p className="text-base font-bold text-slate-900">{viewingInvoice.customer?.name || "Unknown Customer"}</p>
+                    {viewingInvoice.customer?.phone && <p className="text-slate-600 mt-1">{viewingInvoice.customer.phone}</p>}
+                    {viewingInvoice.customer?.email && <p className="text-slate-600">{viewingInvoice.customer.email}</p>}
+                    {(viewingInvoice.customer?.billingAddress || viewingInvoice.customer?.city) && (
+                      <p className="text-slate-600 whitespace-pre-wrap mt-1">
+                        {[viewingInvoice.customer?.billingAddress, viewingInvoice.customer?.city, viewingInvoice.customer?.state, viewingInvoice.customer?.pincode].filter(Boolean).join(", ")}
+                      </p>
+                    )}
+                    {viewingInvoice.customer?.gstin && <p className="text-slate-600 mt-1">GSTIN: <span className="font-medium">{viewingInvoice.customer.gstin}</span></p>}
+                  </div>
+                </div>
+
+                {/* Items Table */}
+                <div className="mt-10 overflow-x-auto">
+                  <table className="w-full min-w-[500px] text-left text-sm">
+                    <thead>
+                      <tr className="border-b-2 border-slate-900 text-slate-900">
+                        <th className="py-3 font-bold uppercase tracking-wider text-xs">Item</th>
+                        <th className="py-3 text-center font-bold uppercase tracking-wider text-xs">Qty</th>
+                        <th className="py-3 text-right font-bold uppercase tracking-wider text-xs">Rate</th>
+                        <th className="py-3 text-right font-bold uppercase tracking-wider text-xs">GST</th>
+                        <th className="py-3 text-right font-bold uppercase tracking-wider text-xs">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {viewingInvoice.items?.map((item: any) => (
+                        <tr key={item.id}>
+                          <td className="py-4 font-medium text-slate-900">{item.productName}</td>
+                          <td className="py-4 text-center text-slate-600">{Number(item.quantity)}</td>
+                          <td className="py-4 text-right text-slate-600">₹{Number(item.unitPrice).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
+                          <td className="py-4 text-right text-slate-600">{Number(item.gstRate)}%</td>
+                          <td className="py-4 text-right font-medium text-slate-900">₹{Number(item.total).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Totals */}
+                <div className="mt-8 flex flex-col items-end border-t pt-6">
+                  <div className="w-full max-w-xs space-y-3 text-sm">
+                    <div className="flex justify-between text-slate-600">
+                      <span>Subtotal</span>
+                      <span>₹{Number(viewingInvoice.subtotal).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+                    </div>
+                    <div className="flex justify-between text-slate-600">
+                      <span>GST Amount</span>
+                      <span>₹{(Number(viewingInvoice.cgst) + Number(viewingInvoice.sgst) + Number(viewingInvoice.igst)).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+                    </div>
+                    <div className="flex justify-between border-t border-slate-200 pt-3 text-lg font-bold text-slate-900">
+                      <span>Grand Total</span>
+                      <span>₹{Number(viewingInvoice.total).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Payment Status Block */}
+                <div className="mt-12 rounded-xl bg-slate-50 p-6 border border-slate-100">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-4">
+                    Payment Information
+                  </h3>
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                    <div>
+                      <span
+                        className={`inline-block rounded-full px-3 py-1 text-xs font-bold tracking-wide uppercase ${
+                          viewingInvoice.status === "PAID"
+                            ? "bg-green-100 text-green-700"
+                            : viewingInvoice.status === "PARTIALLY_PAID"
+                              ? "bg-yellow-100 text-yellow-700"
+                              : viewingInvoice.status === "CANCELLED"
+                                ? "bg-slate-200 text-slate-700"
+                                : "bg-red-100 text-red-700"
+                        }`}
+                      >
+                        {viewingInvoice.status === "PAID" ? "Paid" : viewingInvoice.status === "PARTIALLY_PAID" ? "Partial" : viewingInvoice.status === "CANCELLED" ? "Cancelled" : "Unpaid"}
+                      </span>
+                    </div>
+                    
+                    <div className="flex gap-6 text-sm">
+                      <div className="flex flex-col">
+                        <span className="text-slate-500">Paid Amount</span>
+                        <span className="font-bold text-slate-900 mt-0.5">₹{Number(viewingInvoice.paidAmount).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-slate-500">Outstanding</span>
+                        <span className="font-bold text-red-600 mt-0.5">₹{Math.max(0, Number(viewingInvoice.total) - Number(viewingInvoice.paidAmount)).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="border-t bg-white px-6 py-4 rounded-b-2xl flex justify-between items-center">
+              <button
+                onClick={() => {
+                  setIsViewing(false);
+                  setViewingInvoice(null);
+                }}
+                className="rounded-lg border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+              >
+                Close
+              </button>
+              
+              <div className="flex gap-3">
+                <button
+                  onClick={() => window.print()}
+                  className="rounded-lg border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+                >
+                  Print
+                </button>
+                <button
+                  disabled
+                  className="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white opacity-50 cursor-not-allowed"
+                  title="PDF generation is currently being integrated"
+                >
+                  Download PDF
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
     </main>
   );
 }
@@ -792,4 +1112,274 @@ function StatCard({ title, value }: { title: string; value: string }) {
       <p className="mt-2 text-2xl font-bold text-slate-900">{value}</p>
     </div>
   );
+}
+
+function CustomerSelectDropdown({ customers, value, onChange, onAddCustomer }: {
+  customers: Customer[],
+  value: string,
+  onChange: (val: string) => void,
+  onAddCustomer: () => void
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const filteredCustomers = customers.filter(c => 
+    c.name.toLowerCase().includes(search.toLowerCase()) || 
+    (c.phone && c.phone.includes(search))
+  );
+
+  const selectedCustomer = customers.find(c => c.id === value);
+
+  return (
+    <div className="relative" ref={dropdownRef}>
+      <label className="mb-2 block text-sm font-medium text-slate-700">
+        Customer
+      </label>
+      
+      <div 
+        className="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-100 cursor-pointer flex justify-between items-center"
+        onClick={() => setIsOpen(!isOpen)}
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setIsOpen(!isOpen);
+          }
+        }}
+      >
+        {selectedCustomer ? (
+          <div className="flex flex-col text-left">
+            <span className="font-semibold text-slate-900">{selectedCustomer.name}</span>
+            {selectedCustomer.phone && <span className="text-xs text-slate-500">{selectedCustomer.phone}</span>}
+          </div>
+        ) : (
+          <span className="text-slate-400">Select customer</span>
+        )}
+        <ChevronsUpDown size={16} className="text-slate-400 shrink-0 ml-2" />
+      </div>
+
+      {isOpen && (
+        <div className="absolute z-10 mt-2 w-full rounded-lg border border-slate-200 bg-white shadow-xl overflow-hidden">
+          <div className="p-2 border-b border-slate-100 bg-slate-50">
+            <div className="relative">
+              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input 
+                type="text" 
+                placeholder="Search customer..." 
+                className="w-full pl-8 pr-3 py-2 text-sm rounded-md border border-slate-200 bg-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                autoFocus
+              />
+            </div>
+          </div>
+          
+          <div className="max-h-60 overflow-y-auto p-1">
+            <button
+              type="button"
+              onClick={() => {
+                setIsOpen(false);
+                onAddCustomer();
+              }}
+              className="w-full text-left px-3 py-2.5 text-sm text-blue-600 font-semibold hover:bg-blue-50 rounded-md flex items-center gap-2 transition-colors"
+            >
+              <Plus size={16} /> Add New Customer
+            </button>
+            
+            <div className="my-1 border-t border-slate-100" />
+            
+            {filteredCustomers.length === 0 ? (
+              <div className="px-3 py-4 text-center text-sm text-slate-500">
+                No customers found.
+              </div>
+            ) : (
+              filteredCustomers.map(customer => (
+                <button
+                  key={customer.id}
+                  type="button"
+                  onClick={() => {
+                    onChange(customer.id);
+                    setIsOpen(false);
+                    setSearch("");
+                  }}
+                  className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 rounded-md flex justify-between items-center transition-colors"
+                >
+                  <div className="flex flex-col">
+                    <span className="font-medium text-slate-900">{customer.name}</span>
+                    {customer.phone && <span className="text-xs text-slate-500">{customer.phone}</span>}
+                  </div>
+                  {value === customer.id && <Check size={16} className="text-blue-600 shrink-0" />}
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function AddCustomerModal({ customers, onClose, onSuccess }: { customers: Customer[], onClose: () => void, onSuccess: (c: Customer) => void }) {
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
+  const [address, setAddress] = useState("");
+  const [city, setCity] = useState("");
+  
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name.trim()) {
+      setError("Customer Name is required.");
+      return;
+    }
+    
+    if (phone.trim()) {
+      const duplicate = customers.find(c => c.phone === phone.trim());
+      if (duplicate) {
+        setError(`A customer named "${duplicate.name}" already exists with this phone number. Please select them from the list or use a different phone number.`);
+        return;
+      }
+    }
+    
+    setIsSaving(true);
+    setError("");
+    try {
+      const res = await fetch("/api/customers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, phone, email, billingAddress: address, city })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.message || "Failed to create customer");
+      
+      onSuccess(data.data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to create customer. Please try again.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 px-4 py-6 backdrop-blur-sm">
+      <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl flex flex-col max-h-[90vh]">
+        <div className="flex items-center justify-between border-b px-6 py-4">
+          <div>
+            <h2 className="text-lg font-bold text-slate-900">Add New Customer</h2>
+            <p className="text-sm text-slate-500">Add a customer without leaving your invoice.</p>
+          </div>
+          <button 
+            onClick={onClose} 
+            disabled={isSaving} 
+            className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors disabled:opacity-50"
+            aria-label="Close modal"
+          >
+            <X size={20} />
+          </button>
+        </div>
+        
+        <div className="overflow-y-auto p-6">
+          <form id="add-customer-form" onSubmit={handleSave} className="space-y-4">
+            {error && (
+              <div className="mb-4 text-sm text-red-600 bg-red-50 p-3 rounded-lg border border-red-200">
+                {error}
+              </div>
+            )}
+            
+            <div>
+              <label className="mb-1 block text-sm font-medium text-slate-700">
+                Customer Name <span className="text-red-500 ml-0.5">*</span>
+              </label>
+              <input 
+                type="text" 
+                required 
+                value={name} 
+                onChange={e => setName(e.target.value)} 
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none transition-all focus:border-blue-600 focus:ring-[3px] focus:ring-blue-600/12" 
+                placeholder="e.g. Rahul Sharma"
+              />
+            </div>
+            
+            <div>
+              <label className="mb-1 block text-sm font-medium text-slate-700">Phone Number</label>
+              <input 
+                type="tel" 
+                value={phone} 
+                onChange={e => setPhone(e.target.value)} 
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none transition-all focus:border-blue-600 focus:ring-[3px] focus:ring-blue-600/12" 
+                placeholder="e.g. 9876543210"
+              />
+            </div>
+            
+            <div>
+              <label className="mb-1 block text-sm font-medium text-slate-700">Email</label>
+              <input 
+                type="email" 
+                value={email} 
+                onChange={e => setEmail(e.target.value)} 
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none transition-all focus:border-blue-600 focus:ring-[3px] focus:ring-blue-600/12" 
+                placeholder="e.g. rahul@example.com"
+              />
+            </div>
+            
+            <div>
+              <label className="mb-1 block text-sm font-medium text-slate-700">Address</label>
+              <input 
+                type="text" 
+                value={address} 
+                onChange={e => setAddress(e.target.value)} 
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none transition-all focus:border-blue-600 focus:ring-[3px] focus:ring-blue-600/12" 
+                placeholder="e.g. 123 Business Street"
+              />
+            </div>
+            
+            <div>
+              <label className="mb-1 block text-sm font-medium text-slate-700">City</label>
+              <input 
+                type="text" 
+                value={city} 
+                onChange={e => setCity(e.target.value)} 
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none transition-all focus:border-blue-600 focus:ring-[3px] focus:ring-blue-600/12" 
+                placeholder="e.g. Mumbai"
+              />
+            </div>
+          </form>
+        </div>
+        
+        <div className="border-t bg-slate-50 px-6 py-4 flex justify-end gap-3 rounded-b-2xl">
+          <button 
+            type="button" 
+            onClick={onClose} 
+            disabled={isSaving} 
+            className="rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          
+          <button 
+            type="submit" 
+            form="add-customer-form"
+            disabled={isSaving} 
+            className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 transition-colors disabled:opacity-50 min-w-[120px]"
+          >
+            {isSaving ? "Saving..." : "Save Customer"}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
 }

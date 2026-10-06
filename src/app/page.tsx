@@ -443,13 +443,17 @@ export default function Home() {
             </p>
           </div>
 
-          <div className="flex gap-5 text-sm text-slate-500">
+          <div className="flex flex-wrap items-center gap-2 text-sm text-slate-500 sm:gap-3">
             <Link href="/login" className="hover:text-blue-600">
               Login
             </Link>
-
+            <span>|</span>
             <Link href="/register" className="hover:text-blue-600">
               Register
+            </Link>
+            <span>|</span>
+            <Link href="/privacy-policy" className="hover:text-blue-600">
+              Privacy Policy
             </Link>
           </div>
 

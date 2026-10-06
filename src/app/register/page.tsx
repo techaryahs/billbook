@@ -157,8 +157,10 @@ export default function RegisterPage() {
         </div>
 
         <p className="mt-6 text-center text-xs text-slate-400">
-          By creating an account, you agree to Aryahs&apos; terms and
-          conditions.
+          By creating an account, you agree to our{" "}
+          <Link href="/privacy-policy" className="font-semibold text-blue-600 hover:underline">
+            Privacy Policy
+          </Link>.
         </p>
       </div>
     </main>
